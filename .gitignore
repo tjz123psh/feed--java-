@@ -1,0 +1,8 @@
+target/
+data/uploads/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.zed/
