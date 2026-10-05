@@ -1,0 +1,53 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3307/feedsystem?connectionTimeZone=LOCAL&allowPublicKeyRetrieval=true&useSSL=false
+    password: ${MYSQL_ROOT_PASSWORD:123456}
+    username: root
+    hikari:
+      maximum-pool-size: 10
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:123456}
+      timeout: 2s
+      lettuce:
+        pool:
+          enabled: true
+
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 210MB
+
+  jackson:
+    deserialization:
+      # Jackson 3 默认开启 FAIL_ON_NULL_FOR_PRIMITIVES：请求体里缺 int/long 字段会 500。
+      # 原版（Go）缺字段按零值处理（如 limit 缺省 → 归一成 10、as_of 缺省 → 用当前分钟），所以关掉它。
+      fail-on-null-for-primitives: false
+feed:
+  redis:
+    key-prefix: "v1:"
+  kafka:
+    bootstrap: ${KAFKA_BOOTSTRAP:localhost:9092}
+
+  outbox:
+    fixed-delay-ms: 1000  #轮询间隔时间
+    batch-size: 100       #每次取多少行
+
+  jwt:
+    secret: ${JWT_SECRET:feedsystem-dev-secret-key}
+
+  upload-root: ${UPLOAD-ROOT:${user.dir}/data/uploads}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: worker
+  main:
+    web-application-type: none

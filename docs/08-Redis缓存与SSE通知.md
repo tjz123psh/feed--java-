@@ -64,7 +64,8 @@ CREATE TABLE `messages` (
 ## 第 2 步 · 先做私信：全项目最简单的一域
 
 为什么先做它：一张表、两个接口、无缓存、无实时推送，拿来验证"阶段 3 的鉴权拦截器 + 阶段 5 之后
-的写库套路"还活着，再动通知那种长连接东西。
+的写库套路"还活着，再动通知那种长连接东西。文件摆放：`Message` 实体、`MessageController` / `MessageService` /
+`MessageMapper` 都放 `message` 包（= `src/main/java/io/github/p_feed/message/`）。
 
 | 端点 | 请求 | 响应与校验 |
 |------|------|------------|
@@ -120,7 +121,8 @@ SSE 组单独一个拦截器：token **先取查询参数 `?token=`**，取不�
 
 ## 第 5 步 · SseHub 与 `/notification/stream`
 
-六条语义（Hub 的全部行为契约）：
+本节与下一节的类都放 `notification` 包（= `src/main/java/io/github/p_feed/notification/`），
+先写 `notification/SseHub.java`。六条语义（Hub 的全部行为契约）：
 
 - 按 userId 组织连接：**一个用户多条连接**（多标签页各算一条）。
 - 每条连接一个容量 **20** 的有界缓冲；投递非阻塞，**满则丢弃不阻塞**——慢客户端不拖累服务端，靠下次 `/list` 兜底。
@@ -131,6 +133,7 @@ SSE 组单独一个拦截器：token **先取查询参数 `?token=`**，取不�
 Java 版用"每连接一个有界缓冲 + 一个专职写线程"实现同一套语义：
 
 ```java
+// 文件：io.github.p_feed.notification.SseHub
 @Component
 public class SseHub {
     private final Map<Long, List<Client>> clients;     // 读多写少，配读写锁
@@ -164,6 +167,8 @@ graph LR
 1. `SseEmitter` 构造**必须显式传 0**——不传超时值时默认约 **30 秒**就断流，`0` 才是永不为空闲超时。
 2. yml 里兜底一层（**并进已有的 `spring:` 块**，别出现两个顶层 `spring:`；已对照官方文档核实，2026-09-03）：
 
+> （追加进 `src/main/resources/application.yml` 已有的 `spring:` 块，其他键不动。）
+
 ```yaml
 spring:
   mvc:
@@ -179,7 +184,7 @@ spring:
 
 ## 第 6 步 · 接上 cg-notification：让通知真的产生
 
-消费者处理每条消息只有五步（`NotificationConsumer` 复用《07》第 6 步的 `AbstractConsumer`）：
+消费者处理每条消息只有五步（`consumers/NotificationConsumer.java`，复用《07》第 6 步的 `AbstractConsumer`，包路径与《07》相同）：
 
 1. 按 action 过滤：只处理 `like` / `publish` / `follow`，unlike、delete、unfollow 不产生通知。
 2. 关键字段为 0 就跳过，而且**三类事件看的字段不一样**（照抄原版 `notificationworker.go`）：like 查 `user_id`/`video_id`、comment 查 `author_id`/`video_id`、follow 查 `follower_id`/`vlogger_id`。

@@ -39,18 +39,20 @@ CREATE TABLE `socials` (
 本阶段只把规则挂上，按规则表拦截的完整实现要到《09》。
 
 验证（还停在 mysql 里）：`SHOW TABLES;`。**通过标志**：到这一步为止库里应当有
-`accounts`、`videos`、`tags`、`video_tags`、`outbox_msgs`、`comments`、`likes`、`socials` **八张表**。
+`accounts`、`videos`、`tags`、`video_tags`、`outbox_msgs`、`comments`、`likes`、`notifications`、`socials` **九张表**
+（`notifications` 是《05》第 1 步建的，容易漏数）。
 
 ## 第 2 步 · 写关注与取关两个接口
 
 五个 `social` 接口全在 `/social` 组、全部需登录；`follow` 与 `unfollow` 挂第 1 步那条限流 `social_write` 20 / 分钟 / 账号。
-本阶段要写的类如下（后面各步逐个补齐，先建空壳让 IDE 帮你分层）：
+本阶段要写的类如下（后面各步逐个补齐，先建空壳让 IDE 帮你分层；包名 = `src/main/java/io/github/p_feed/` 下的子包）：
 
 ```text
-SocialController / SocialService / SocialMapper
-FeedController   / FeedService   / FeedMapper / TimelineRedisService
-VideoEntityCache                  ← 第 8 步的三级缓存
-SoftJwtAuthInterceptor            ← 只有"完全不带头"才匿名；带了头就必须通过，否则 401
+SocialController / SocialService / SocialMapper        ← social 包
+FeedController   / FeedService   / FeedMapper          ← feed 包
+TimelineRedisService                                    ← feed 包（时间线键的读写收口）
+VideoEntityCache                                        ← feed 包（第 8 步的三级缓存）
+SoftJwtAuthInterceptor                                  ← web 包（《03》第 4 步那个包）
 ```
 
 `POST /social/follow`：校验顺序固定为**参数 → 双方账号存在 → 不能关注自己 → 不能重复关注**，
@@ -65,6 +67,7 @@ SoftJwtAuthInterceptor            ← 只有"完全不带头"才匿名；带了�
 最后调用**消息发布器**。接口形状在这里定死（《07》第 7 步会给它加一个 Kafka 实现并委托过去）：
 
 ```java
+// 文件：io.github.p_feed.social.SocialEventPublisher
 public interface SocialEventPublisher {
     /** false = 没投出去，调用方必须走同步兜底 */
     boolean publishFollow(long followerId, long vloggerId);
@@ -92,13 +95,13 @@ unfollow 同样三步，但不产生通知。
 ## 第 4 步 · Feed 的公共底座：软鉴权 + limit 归一 + 一条组装函数
 
 五个端点全在 `/feed` 组；`listByFollowing` 硬 JWT（复用《03》那个拦截器），其余四个走**软鉴权**。
-先写 `SoftJwtAuthInterceptor`，规则只有一条分界：**请求完全没有 `Authorization` 头** → 匿名放行（viewer=0，所有 `is_liked` 一律 false）；**只要带了头**，就和硬鉴权一样严格——非 `Bearer` 格式 → 401 `invalid authorization header`、验签/过期失败 → 401 `invalid or expired token`、白名单不符 → 401 `token has been revoked`。"带了坏头当匿名"是错的：那等于给伪造 token 开了后门。
+先写 `SoftJwtAuthInterceptor`（放《03》第 4 步的 `web` 包，和 `JwtAuthInterceptor` 并列），规则只有一条分界：**请求完全没有 `Authorization` 头** → 匿名放行（viewer=0，所有 `is_liked` 一律 false）；**只要带了头**，就和硬鉴权一样严格——非 `Bearer` 格式 → 401 `invalid authorization header`、验签/过期失败 → 401 `invalid or expired token`、白名单不符 → 401 `token has been revoked`。"带了坏头当匿名"是错的：那等于给伪造 token 开了后门。
 但带了合法格式的头就必须验签通过，不能"松"成伪造可用。limit 一律：`<=0 或 >50 → 10`。
 
 所有 Feed 接口的元素结构 `FeedVideoItem` 逐字如下（注意 `create_time` 是**秒**）：
 
 ```jsonc
-{"id":1, "author":{"id":1,"username":"u"}, "title":"t", "description":"d"(可省略),
+{"id":1, "author":{"id":1,"username":"u"}, "title":"t", "description":"d",
  "play_url":"...", "cover_url":"...",
  "create_time":1756814652,          // 秒
  "likes_count":3, "is_liked":false}
@@ -187,6 +190,8 @@ singleflight 用 `ConcurrentHashMap<Long, CompletableFuture<Video>>` + `computeI
 按 `sf:entity:{id}` 把同 id 并发合并成一次查库。
 
 本阶段只新增一个依赖（版本由 Boot BOM 托管，**不写 `<version>`**）：
+
+> 追加进 `pom.xml`（工程根 `feed-java/pom.xml`，已有部分保留）
 
 ```xml
 <dependency>

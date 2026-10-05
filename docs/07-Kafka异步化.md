@@ -84,6 +84,7 @@ docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server loca
 
 ```bash
 #!/usr/bin/env bash
+# 文件：deploy/create-topics.sh
 set -e
 cd "$(dirname "$0")"
 BROKER=localhost:9092
@@ -126,17 +127,22 @@ bash deploy/create-topics.sh        # 期望末尾列出 10 个 topic
 cd deploy
 # 发：敲一行 JSON 回车，Ctrl-C 退出
 docker compose exec -it kafka /opt/kafka/bin/kafka-console-producer.sh \
-  --bootstrap-server localhost:9092 --topic like-events --property print.key=true
+  --bootstrap-server localhost:9092 --topic like-events \
+  --property parse.key=true --property key.separator=\t
 # 收：--from-beginning 会把刚发的读出来，Ctrl-C 退出
 docker compose exec -it kafka /opt/kafka/bin/kafka-console-consumer.sh \
   --bootstrap-server localhost:9092 --topic like-events --group smoke --from-beginning
 ```
 
-发送端输入（key 用 `\t` 分隔，console-producer 加 `--property key.separator=` 时可省，这里直接输 JSON 即可）：
+发送端输入（`key` 与 JSON 之间用一个 Tab 分隔；`parse.key=true` 会把 Tab 左侧作为消息 key）：
 
-```json
-{"event_id":"smoke1","action":"like","user_id":1,"video_id":2,"occurred_at":"2026-09-03T10:00:00Z"}
+```text
+2	{"event_id":"smoke1","action":"like","user_id":1,"video_id":2,"occurred_at":"2026-09-03T10:00:00Z"}
 ```
+
+消费端如需同时打印 key，追加 `--property print.key=true --property key.separator=\t`（fish 写法，见下方注意）。
+
+> **fish 用户的坑（2026-09-28 实测）**：`$'\t'` 是 bash 的 ANSI-C 引用，fish 会报"在变量 $ 之后没有变量名"；fish 的等价写法是**不加引号**的 `\t`，它会展开成真正的 Tab。上面的命令已按 fish 写法给出；bash 用户仍用 `$'\t'`。
 
 **通过标志**：消费端原样打印出这行 JSON。看到它，说明 broker、端口、监听器配置三件事都对了。
 
@@ -152,7 +158,7 @@ docker compose exec -it kafka /opt/kafka/bin/kafka-console-consumer.sh \
 </dependency>
 ```
 
-验一下它真的解析到了：`./mvnw -q dependency:tree | grep kafka`（期望出现 `kafka-clients:jar:4.1.2`）。
+验一下它真的解析到了：`./mvnw dependency:tree -Dincludes=org.apache.kafka`（期望出现 `kafka-clients:jar:4.1.2`）。**别用 `-q`**：实测本项目的 `./mvnw -q dependency:tree` 会输出 0 行（树走 INFO 日志、被 `-q` 吞掉）。
 
 `application.yml` 的 `feed:` 段下追加（`feed:` 已存在，**并进原块**，别写成两个顶层 `feed:`）：
 
@@ -168,6 +174,7 @@ feed:
 `AppProps` 相应加两个嵌套 record（《02》第 7 步预告过"后面各阶段往里加"）：
 
 ```java
+// 文件：io.github.p_feed.config.AppProps（已有类：追加 kafka / outbox 两个嵌套 record）
 @ConfigurationProperties(prefix = "feed")
 public record AppProps(Redis redis, Jwt jwt, Kafka kafka, Outbox outbox) {
     // redis / jwt 已有，这里新增 kafka 与 outbox
@@ -201,9 +208,10 @@ public record AppProps(Redis redis, Jwt jwt, Kafka kafka, Outbox outbox) {
 | `retries` | 3 | 与 `delivery.timeout.ms` 一起限制重试窗口 |
 | `enable.idempotence` | false | 见下面那条说明 |
 
-Java 侧的写法：`producer.send(record).get(2, TimeUnit.SECONDS)`，捕获
-`TimeoutException` / `KafkaException` → 返回 false → 走同步降级。`get` 的超时只是最后一道兜底，
-真正保证"不阻塞 60 秒"的是上表那两个 2000。
+Java 侧不要把 `send()` 阻塞时间和 `Future.get()` 的等待时间简单相加成两个固定的 2 秒。
+调用开始时记录一个 2 秒截止时间：`send()` 返回后只等待剩余时间；捕获
+`TimeoutException` / `KafkaException` → 返回 false → 走同步降级。`max.block.ms` 和截止时间共同保证一次发布调用尽快返回，
+`delivery.timeout.ms` 约束 Kafka 自身的投递窗口。
 
 > 说明：`enable.idempotence=false` 建议写明，但**不写也不会炸**。Kafka 3.0 起幂等默认开启且要求
 > `acks=all`；实测语义是：如果你**没有显式设置**幂等开关而 `acks` 与它冲突，客户端只打一行日志
@@ -234,6 +242,8 @@ Java 侧的写法：`producer.send(record).get(2, TimeUnit.SECONDS)`，捕获
 ```
 
 先验生产者，不碰消费者：
+
+> （放进 `src/test/java/io/github/p_feed/mq/EventPublisherTest.java` 测试类里）
 
 ```java
 @Test
@@ -294,6 +304,7 @@ void publishLikeReachable() {   // 起一个 kafka-console-consumer 在别的终
 Java 侧照搬：
 
 ```java
+// 文件：io.github.p_feed.like.LikeService（已有类：把 like(…) 方法主体改写为下方形状）
 // LikeService.like(...) —— 阶段 5 的无条件同步写，到本阶段改成这个形状
 boolean dbEnqueued  = publisher.publishLike(evt);          // 投 like-events
 boolean popEnqueued = publisher.publishPopularity(evt2);   // 投 video-popularity
@@ -356,13 +367,12 @@ docker compose exec redis redis-cli -a 123456 ZRANGE v1:feed:global_timeline 0 -
 # 4) broker 宕机降级：docker compose stop kafka → 点赞/评论 → 全 200 且库里【立即】有行（同步路径）
 #                     → docker compose start kafka → 自动恢复异步（观察日志重连）
 # 5) outbox 裁剪：脚本连发 1005 条视频 → ZCARD v1:feed:global_timeline 恒为 1000
-# 6) 扇出证明：同一条 like 消息，cg-video-write 与 cg-notification 各有进度
+# 6) 本阶段的消费组证明：cg-video-write 与 cg-timeline 各有进度
 #    docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
 #      --bootstrap-server localhost:9092 --describe --group cg-video-write
 ```
 
-第 6 项的 `cg-notification` 要阶段 8 才装配，现在能看到的组只有 `cg-video-write` 和 `cg-timeline`——
-看到它们有 CONSUMER-ID 和 LAG=0 就是本阶段的通过标志。
+`cg-notification` 要到阶段 8 才装配，因此本阶段只验 `cg-video-write` 与 `cg-timeline`；阶段 8 再单独验证通知消费组的扇出。看到本阶段消费组有 CONSUMER-ID 且 LAG=0，就是本阶段的通过标志。
 
 ## 卡住了看这里
 
@@ -392,5 +402,7 @@ docker compose exec redis redis-cli -a 123456 ZRANGE v1:feed:global_timeline 0 -
 
 **`docker compose up -d kafka` 拉镜像超时。**
 原因：到 Docker Hub 的网络不通。
-处理：`docker pull docker.1ms.run/library/apache/kafka:latest` 之后
-`docker tag` 成 `apache/kafka:latest`（做法同《02》"卡住了看这里"的 MySQL）。
+处理：`docker pull docker.1ms.run/apache/kafka:latest` 之后
+`docker tag docker.1ms.run/apache/kafka:latest apache/kafka:latest`
+（做法同《02》"卡住了看这里"的 MySQL。注意 Kafka 镜像在 `apache/` 命名空间、**不带 `library/` 前缀**——
+`docker.1ms.run/library/apache/kafka:latest` 实测不存在，2026-09-28 在本机核实）。

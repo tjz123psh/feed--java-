@@ -38,6 +38,7 @@ feed:
 新建 `infra/RateLimits.java`（原来写在《02》，现已移走，因为规则到本阶段才用到）。**本阶段只放两条**，《05》追加 `like_write` / `comment_write`、《06》追加 `social_write`：
 
 ```java
+// 文件：io.github.p_feed.infra.RateLimits
 public final class RateLimits {
     public record Rule(String name, int limit, Duration window, boolean byIp) {}
     public static final List<Rule> ALL = List.of(
@@ -191,7 +192,7 @@ reg.addInterceptor(rateLimit).addPathPatterns("/account/login", "/account/regist
 multipart 字段 `file`；上限 10 MB、扩展名 jpg/jpeg/png/webp 四种（大小写不敏感）、
 存 `uploads/avatars/{uid}/{随机16字节hex+扩展名}`（根目录是《02》第 6 步建的 `data/uploads`）、
 返回绝对 URL（Host 头 + X-Forwarded-Proto）；校验不过 400，写盘异常 500，文案见第 2 步。
-最后写 `AccountContractTest`：第 2 步每个接口的成功与失败路径都断言，**文案逐字**。
+最后写 `AccountContractTest`（放 `src/test/java/io/github/p_feed/account/`）：第 2 步每个接口的成功与失败路径都断言，**文案逐字**。
 **通过标志**：响应里的 URL 浏览器能打开，`ls data/uploads/avatars/1/` 有 16 字节 hex 命名的文件；`./mvnw -q test` 全绿，故意改错一个文案时测试会变红。
 
 ## 本阶段验收清单
