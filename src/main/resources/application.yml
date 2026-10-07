@@ -24,6 +24,10 @@ spring:
       max-file-size: 200MB
       max-request-size: 210MB
 
+  mvc:
+    async:
+      request-timeout: -1
+
   jackson:
     deserialization:
       # Jackson 3 默认开启 FAIL_ON_NULL_FOR_PRIMITIVES：请求体里缺 int/long 字段会 500。
@@ -36,8 +40,8 @@ feed:
     bootstrap: ${KAFKA_BOOTSTRAP:localhost:9092}
 
   outbox:
-    fixed-delay-ms: 1000  #轮询间隔时间
-    batch-size: 100       #每次取多少行
+    fixed-delay-ms: 1000 #轮询间隔时间
+    batch-size: 100 #每次取多少行
 
   jwt:
     secret: ${JWT_SECRET:feedsystem-dev-secret-key}

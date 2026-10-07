@@ -1,12 +1,12 @@
 # WORKING.md —— Feed-Java 项目 AI 交接文档
 
-> **给 AI 的说明**：换模型 / 换会话 / 压缩后，先读本文件，再读 `docs/README.md`，然后以 Git 状态、源码和测试为准核验。本文件由模型随时更新（用户在规则中已授权"模型觉得需要写入就写入"），每次关键步骤结束应顺手刷新。最后更新：2026-10-06。
+> **给 AI 的说明**：换模型 / 换会话 / 压缩后，先读本文件，再读 `docs/README.md`，然后以 Git 状态、源码和测试为准核验。本文件由模型随时更新（用户在规则中已授权"模型觉得需要写入就写入"），每次关键步骤结束应顺手刷新。最后更新：2026-10-07。
 
 ## 0. 项目一句话
 
 `/home/pang/Projects/Feed stream/feed-java`：用 **Java 21 + Spring Boot 4.0.8 + MyBatis-Plus 3.5.17 + mysql-connector-j 9.7.0** 从零重写仿抖音短视频 Feed 系统（Go 原版 `feedsystem_video_go-main`）。接口契约、表结构、缓存 key、错误文案全在 `docs/` 12 份中文文档里，**不需要读 Go 源码**，按文档实现即可。项目根下的 `.ai/WORKING.md` 是 AI 交接入口，`docs/README.md` §1.5 定义每步输出结构。
 
-## 1. 当前进度（核验日期：2026-10-06，`mvnw test` 112/112 绿）
+## 1. 当前进度（核验日期：2026-10-07，`mvnw test` 131/131 绿；含 4 条 Java↔Go 互通用例——Go 版不在线时它们自动 skip，其余 127 条不受影响）
 
 ### 阶段 2 · 环境与工程骨架 —— ✅ 已完成
 
@@ -86,7 +86,7 @@
 11. ✅ 第 11 步 全链路降级与前端联调（2026-09-28）：**《06》本阶段验收清单六条全绿**（脚本已入库：`.ai/accept/stage6-accept.sh`，`bash .ai/accept/stage6-accept.sh`，实跑 `FAIL=0`）——① 与参考实现双跑 = SKIP（8080 没跑 Go 版，文档标注可选，差异清单见 README §4）；② 新关注博主 → 其视频立刻出现在关注流第一页（真注册+登录+follow，证明 SCAN 失效生效）；③ 真实点赞写进 `v1:hot:video:1m:{分钟}` 窗口（ZSCORE 从无到 1）+ 同一 as_of 灌 99 分后第一页不变 + 下一分钟新快照里 99 分登顶；④ `FLUSHDB` 后五种流全 200（**FLUSHDB 连 token 白名单一起清 → 脚本里重新登录后才拿到 200**）；⑤ `limit` 0/51 都归一成 10 条（用直查 DB 的 `listLikesCount` 断言，避开时间线窗口干扰）+ 单游标 → 400 文案逐字；⑥ 停 Redis 后 `listLatest` 200（DB 兜底），"100 并发只 1 次查库"由 `VideoEntityCacheTest` 覆盖。**前端联调**（原版前端 + 临时把 vite proxy 指向 8081，验完已还原 + 停掉 dev server）：推荐 tab（`listLatest` 200、真数据渲染）、关注 tab（`listByFollowing` 200，登录后显示 @fb36703）、点赞榜 tab（`listLikesCount` 200）、热榜页（`listByPopularity` 200，**「加载更多」实测发出 `{"limit":10,"as_of":<上一响应的 as_of>,"offset":10}` 并拿到第二页**）、移动端 390×844 布局正常、console 只有 favicon 404。**遗留缺陷（原版前端，非本仓）**：首页三个 tab 的"下拉翻页"不可达 —— `HomeView` 用 `v-show="idx >= visibleRange.start && idx <= visibleRange.end"` 只让 `activeIndex±1` 三屏参与布局，而 `useVideoPlayer.ts:41` 用 `idx = round(scrollTop / el.clientHeight)` 反推下标 → **可达下标恒为 0~2**，永远到不了 `loadMoreIfNeeded` 的 `activeIndex >= items.length - 3` 门槛（实测连按 12 次 ↓ 后 `.active` 仍停在第 3 屏、`scrollTop` 钉在 1224；前端也没有 wheel/touch 处理可绕开）。后端翻页本身正确：curl 两页各 10 条、**交集 0**。**话题页（`listByTag`）前端无页面无入口**，只能 curl 验（脚本第 4 步已覆盖 200）。
 12. ✅ 阶段 6 完成判定：本阶段验收清单六条全绿 = 阶段 6 完成；唯一残留是上面那条**原版前端**的分页缺陷，建议留到《09》第 9 步做前端联调改造时一并修（届时同时把 vite proxy 改成 `VITE_API_TARGET` 环境变量，别再硬编码）。**下一步：阶段 7 · outbox 与异步化**（第 2 步的 Noop 发布器换真链路、`v1:feed:global_timeline` 与热度窗口改由消费者维护）。
 
-### 阶段 7 · Kafka 异步化 —— 🚧 进行中（2026-09-28 开工）
+### 阶段 7 · Kafka 异步化 —— ✅ 全部完成（2026-09-28 开工，2026-10-03 收工）
 
 1. ✅ 第 1 步 容器进清单（2026-09-28）：`deploy/docker-compose.yml` 加入 `kafka` 服务（KRaft 单节点；`apache/kafka:latest` 实为 **4.3.1**；9092=业务 / 9093=controller；`ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092`）。验收：`config --services` 列出三服务、`ps` kafka Up、`kafka-topics.sh --list` 退出码 0 + **空列表**、broker 日志 `Kafka Server started`。镜像经 **daocloud 镜像站** 112 秒拉取（1ms 站 16 分钟未完，见 §3）。
 
@@ -110,7 +110,7 @@
 
 > 下一步：《08-Redis缓存与SSE通知》（cg-notification 的装配与扇出在阶段 8 验证）。
 
-### 阶段 8 · Redis 缓存与 SSE 实时通知 —— 🚧 进行中（2026-10-05 开工）
+### 阶段 8 · Redis 缓存与 SSE 实时通知 —— ✅ 全部完成（2026-10-05 开工，2026-10-07 收工）
 
 1. ✅ 第 1 步 messages 表（2026-10-05）：建表（与原版 GORM 逐字一致，供第 8 步跨实现互通）+ 清单核对 **10 张表全齐**；通知实体契约（四类文案与 target_id，含 follow 用 follower_id 的坑）已抄录。
 2. ✅ 第 2 步 私信（2026-10-05）：`message/` 包（Message 实体 + 3 个 dto + mapper + service + controller）；`WebConfig` 新增 `/message/send,/message/list` 鉴权注册（**本项目拦截器是显式路径清单，新端点必须手动加**）；`Errors` 新增两个 400 文案。验收：curl 实体/`[]`/两条 400 全对；`MessageContractTest` 6 用例、全量 **107/107** 绿。过程中修一处笔误：`@JsonProperty("peer")`→`"peer_id"`（mapper 方法名 `listConveration` 拼写未动，纯内部）。差异清单已记：不校验收件人存在。
@@ -121,7 +121,17 @@
 
 4. ✅ 第 4 步 SSE 鉴权与安全决策（2026-10-06）：新增 `web/SseAuthInterceptor`——token 先取 `?token=` 再 `Authorization: Bearer`（**有值就不回退**），401 逐字 `missing token` / `invalid token`（`Errors` 增两常量）；`WebConfig` 单独注册 `/notification/stream`（**不要并进旧的 jwtAuthInterceptor 清单**）。**决策选 b**：额外做《03》白名单比对（`TokenStore.current`），登出/换发立即 401 `token has been revoked`——参考实现只验签、15 分钟内仍放行（差异已记 README §4）。验收脚本 `.ai/accept/stage8-sse-auth.sh` **9 PASS / 0 FAIL**（含"query 坏 token 不回退 header"、"登出后立即失效"两个反查；第 6/7 项第 5 步前显示 500 静态兜底属预期——已从 **spring-webmvc 7.0.9 字节码**确认资源兜底路径也走拦截器链）。`SseAuthTest` 5 用例、全量 **117/117** 绿。
 
-> 下一步：第 5 步 SseHub 与 `/notification/stream`（一个用户多条连接；每连接容量 20 有界缓冲、满即丢；断线摘除；无重连游标；30s keepalive；两个必修的坑：`new SseEmitter(0L)` 与 yml 异步超时兜底）。
+5. ✅ 第 5 步 SseHub 与 SSE 端点（2026-10-07）：`notification/SseHub`（`Map<userId,List<Client>>` + 读写锁；每连接 = `SseEmitter(0L)` + 容量 20 有界缓冲 + virtual 写线程；`push` 非阻塞 offer 满即丢；onCompletion/onTimeout/onError + 写失败自摘，摘除时 interrupt 写线程）；`NotificationController` 加 `GET /notification/stream`；yml 增 `spring.mvc.async.request-timeout: -1`。**帧格式按 spring-webmvc 7.0.9 字节码核实**：`send(实体)` → 逐字 `data:` + JSON + 空行（序列化在发送时由消息转换器完成）；`comment(" keepalive")` → 逐字 `: keepalive`（前导空格在字符串里）。**时序事实：写失败才摘除，日志 `sse remove` 比断开晚 ≤30 秒**。验收脚本 `.ai/accept/stage8-sse-stream.sh` **5 PASS / 0 FAIL**（36 秒挂流：200 + text/event-stream + keepalive）。`SseStreamTest` 4 用例（建流/扇出/只推本人/FIFO）；全量 **121/121** 绿。
+
+6. ✅ 第 6 步 接 cg-notification（2026-10-07）：`mq/consumers/NotificationConsumer`（Kind 枚举 → like-events/comment-events/social-events，同组 `cg-notification`）+ `ApiConsumerBootstrap` 追加三实例（装配点选它而非字面的 ApiApplication：`@Profile("!worker")` 与 `feed.outbox.auto` 门控现成、Worker profile 不加载）并加 Kafka/MySQL 探活（任一不可用 → 三消费者不启动 + 一行 warn）。语义：只放行 like/publish/follow；`follow` 的 target_id=粉丝 id（陷阱）；收件人=视频作者、操作者=作者跳过、作者 0/视频缺跳过（业务性丢弃=提交）；落库与推送分离（push 失败只 warn）。**过程中修一处命名错误**：两个私有方法名写反（`handleFollow` 装着评论逻辑、`handleComment` 装着关注逻辑），`handle()` 按名字分发 → COMMENT/FOLLOW 两路全错——验收脚本只覆盖 like 所以全绿，单测当场抓出（报 `SocialEvent["follower_id"]` 找不到就是它）；已换正，仅改名、逻辑未动。验收脚本 `.ai/accept/stage8-notification-flow.sh` **11 PASS / 0 FAIL**（B 的流收到 `data:` 帧 + 落库 1 行 + 自赞 0 通知）；`NotificationConsumerTest` 6 用例、全量 **127/127** 绿。首启重放三 topic 存量（like 5 / comment 0 / social 10 → 历史探针账号补通知行，属预期）。
+
+7. ✅ 第 7 步 缓存地图收口（2026-10-07）：`docs/cache-map.md` 入库（11 行 = 《08》原文 9 行 + refresh 两键；写方/失效方/TTL 逐条对代码核对；两条时间口径约定）。验收脚本 `.ai/accept/stage8-cache-map.sh` **14 PASS / 0 FAIL**：FLUSHDB 后通知/私信全可用（老 token 走 DB 兜底 + 回填）；点赞后 detail + entity 两键 **~100 ms 内同消**；热度窗口 ZSCORE=1；merge 快照 TTL=120 s；timeline 冷重建 ZCARD=8。本步无代码变更，测试基线沿用 **127/127**。
+
+8. ✅ 第 8 步 与参考实现互通验证（2026-10-07）：Go 版跑 8080（`CONFIG_PATH=configs/config.compose-local.yaml go run ./cmd`；依赖走 `goproxy.cn`；RabbitMQ 用 daocloud 镜像起在 5672）。**AutoMigrate 零改动**（启动前后 mysqldump 逐行 diff 一致）。`SharedCacheCompatTest` 4 用例全真跑绿（**marker 值钉"真命中"**），detail 与 listByFollowing 整页双向互读（is_liked/游标一致）；顺带验证 Go 能用 Java 注册账号登录（同款 bcrypt）。混合部署剧本 `.ai/accept/stage8-interop-mixed.sh` **8 PASS / 0 FAIL**：B 挂 Java 侧流、A 用 Go 点赞 → 无推送 + /list 可见 + 文案逐字（架构事实已写进 README §4）。全量 **131/131**。
+
+**阶段 8（Redis 缓存与 SSE 实时通知）到此全部收工：第 1~8 步 ✅，全量 131/131 绿（Go 离线时 4 条互通自动 skip→127），六本验收脚本入库（notif-read / sse-auth / sse-stream / notification-flow / cache-map / interop-mixed）。**
+
+> 下一步：《09-限流与收尾验收》（全项目最后一份：限流器落位 + 收尾验收）。
 
 ## 2. 关键约定与决策（新会话必须遵守）
 
