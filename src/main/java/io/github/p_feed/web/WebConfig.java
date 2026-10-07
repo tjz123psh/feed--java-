@@ -12,11 +12,13 @@ class WebConfig implements WebMvcConfigurer {
     private final JwtAuthInterceptor jwtAuthInterceptor;
     private final RateLimitInterceptor rateLimitInterceptor;
     private final SoftJwtAuthInterceptor softJwtAuthInterceptor;
+    private final SseAuthInterceptor sseAuthInterceptor;
 
-    public WebConfig(JwtAuthInterceptor jwtAuthInterceptor ,RateLimitInterceptor rateLimitInterceptor, SoftJwtAuthInterceptor softJwtAuthInterceptor){
+    public WebConfig(JwtAuthInterceptor jwtAuthInterceptor ,RateLimitInterceptor rateLimitInterceptor, SoftJwtAuthInterceptor softJwtAuthInterceptor, SseAuthInterceptor sseAuthInterceptor){
         this.jwtAuthInterceptor = jwtAuthInterceptor;
         this.rateLimitInterceptor = rateLimitInterceptor;
         this.softJwtAuthInterceptor = softJwtAuthInterceptor;
+        this.sseAuthInterceptor = sseAuthInterceptor;
     }
 
     @Override
@@ -34,7 +36,12 @@ class WebConfig implements WebMvcConfigurer {
             .addPathPatterns("/comment/publish","/comment/delete")
             .addPathPatterns("/like/like","/like/unlike","/like/isLiked","/like/listMyLikedVideos")
             .addPathPatterns("/social/follow","/social/unfollow","/social/getAllFollowers","/social/getAllVloggers","/social/getCounts")
-            .addPathPatterns("/feed/listByFollowing");
+            .addPathPatterns("/feed/listByFollowing")
+            .addPathPatterns("/message/send", "/message/list")
+            .addPathPatterns("/notification/markRead", "/notification/list", "/notification/unreadCount");
+
+        registry.addInterceptor(sseAuthInterceptor)
+            .addPathPatterns("/notification/stream");
 
         registry.addInterceptor(rateLimitInterceptor)
             .addPathPatterns("/account/register","/account/login")

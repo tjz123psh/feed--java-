@@ -1,5 +1,4 @@
 package io.github.p_feed.infra;
-
 public final class Errors{
 
     private Errors(){}
@@ -18,6 +17,9 @@ public final class Errors{
     // 401
     public static final String ACCOUNT_ID_NOT_FOUND = "accountID not found";
     public static final String INVALID_REFRESH_TOKEN = "invalid refresh token";
+    public static final String INVALID_ACCOUNT = "invalid account";
+    public static final String MISSING_TOKEN = "missing token";
+    public static final String INVALID_TOKEN = "invalid token";
 
     // 404
     public static final String RECORD_NOT_FOUND = "record not found";
@@ -80,5 +82,10 @@ public final class Errors{
     public static final String INVALID_CURSOR_ID_BEFORE = "invalid cursor: id_before must be > 0";
     public static final String LATEST_POPULARITY_MUST_BE_NON_NEGATIVE = "latest_popularity must be >= 0";
     public static final String LATEST_BEFORE_AND_ID_MUST_BE_TOGETHER = "latest_before and latest_id_before must be provided together";
+
+    // 私信
+    public static final String TO_ID_AND_CONTENT_ARE_REQUIRED = "to_id and content are required";
+    public static final String PEER_ID_IS_REQUIRED = "peer_id is required";
     
+
 }

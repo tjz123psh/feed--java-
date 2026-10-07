@@ -5,18 +5,26 @@ import java.time.OffsetDateTime;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @TableName("notifications")
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class Notification{
 
     @TableId(type = IdType.AUTO)
     private Long id;
+    @JsonProperty ("recipient_id")
     private Long recipientId;
+    @JsonProperty ("sender_id")
     private Long senderId;
     private String type;
+    @JsonProperty ("target_id")
     private Long targetId;
     private String content;
+    @JsonProperty ("is_read")
     private Boolean isRead;
+    @JsonProperty ("created_at")
     private OffsetDateTime createdAt;
     
     public Long getId() {

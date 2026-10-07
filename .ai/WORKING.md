@@ -1,12 +1,12 @@
 # WORKING.md —— Feed-Java 项目 AI 交接文档
 
-> **给 AI 的说明**：换模型 / 换会话 / 压缩后，先读本文件，再读 `docs/README.md`，然后以 Git 状态、源码和测试为准核验。本文件由模型随时更新（用户在规则中已授权"模型觉得需要写入就写入"），每次关键步骤结束应顺手刷新。最后更新：2026-09-29。
+> **给 AI 的说明**：换模型 / 换会话 / 压缩后，先读本文件，再读 `docs/README.md`，然后以 Git 状态、源码和测试为准核验。本文件由模型随时更新（用户在规则中已授权"模型觉得需要写入就写入"），每次关键步骤结束应顺手刷新。最后更新：2026-10-06。
 
 ## 0. 项目一句话
 
 `/home/pang/Projects/Feed stream/feed-java`：用 **Java 21 + Spring Boot 4.0.8 + MyBatis-Plus 3.5.17 + mysql-connector-j 9.7.0** 从零重写仿抖音短视频 Feed 系统（Go 原版 `feedsystem_video_go-main`）。接口契约、表结构、缓存 key、错误文案全在 `docs/` 12 份中文文档里，**不需要读 Go 源码**，按文档实现即可。项目根下的 `.ai/WORKING.md` 是 AI 交接入口，`docs/README.md` §1.5 定义每步输出结构。
 
-## 1. 当前进度（核验日期：2026-09-28，`mvnw test` 90/90 绿）
+## 1. 当前进度（核验日期：2026-10-06，`mvnw test` 112/112 绿）
 
 ### 阶段 2 · 环境与工程骨架 —— ✅ 已完成
 
@@ -109,6 +109,19 @@
 **阶段 7（Kafka 异步化）到此全部收工：第 1~9 步 ✅，全量 101/101 绿，两条验收脚本入库（stage7-like-flow.sh / stage7-checklist.sh）。**
 
 > 下一步：《08-Redis缓存与SSE通知》（cg-notification 的装配与扇出在阶段 8 验证）。
+
+### 阶段 8 · Redis 缓存与 SSE 实时通知 —— 🚧 进行中（2026-10-05 开工）
+
+1. ✅ 第 1 步 messages 表（2026-10-05）：建表（与原版 GORM 逐字一致，供第 8 步跨实现互通）+ 清单核对 **10 张表全齐**；通知实体契约（四类文案与 target_id，含 follow 用 follower_id 的坑）已抄录。
+2. ✅ 第 2 步 私信（2026-10-05）：`message/` 包（Message 实体 + 3 个 dto + mapper + service + controller）；`WebConfig` 新增 `/message/send,/message/list` 鉴权注册（**本项目拦截器是显式路径清单，新端点必须手动加**）；`Errors` 新增两个 400 文案。验收：curl 实体/`[]`/两条 400 全对；`MessageContractTest` 6 用例、全量 **107/107** 绿。过程中修一处笔误：`@JsonProperty("peer")`→`"peer_id"`（mapper 方法名 `listConveration` 拼写未动，纯内部）。差异清单已记：不校验收件人存在。
+
+3. ✅ 第 3 步 通知读端三接口（2026-10-06）：`notification/` 补齐 `NotificationService` + `NotificationController` + 3 个 dto（NotificationListResponse / MarkReadRequest / UnreadCountResponse）；`Notification` 实体补蛇形注解（recipient_id/sender_id/target_id/is_read/created_at + NON_EMPTY）；`Errors` 增 401 常量 `INVALID_ACCOUNT`（**逐字 `invalid account`——与本项目其它控制器的 `accountID not found` 不同**）；`WebConfig` 注册三条路径。语义：list = 本人收件 `created_at DESC LIMIT 50`；markRead 单条 = `WHERE id AND recipient_id`（标别人的不报错不生效），空 body / `{}` / 省 id = 标全部（`@RequestBody(required=false)`）；unreadCount 响应键逐字 `count`。**验收脚本入库**：`.ai/accept/stage8-notif-read.sh`（10 PASS / 0 FAIL，含"完全不带 body"与"无 token 401"两个反查项）。过程中修一处路径大小写：`@PostMapping("/unreadcount")` → `"/unreadCount"`（脚本当场 4 项红——"路径拼写错 = 端点静默不存在"家族第三次，前两次 `isliked`/`pubilish`）。`NotificationReadTest` 5 用例、全量 **112/112** 绿。
+
+（环境备注 2026-10-06：系统重装——MySQL 从 DBX 会话备份 `dbx-backup__一次性备份__20261005-234209__feedsystem__59035e44.sql` 导入恢复、Kafka topics 重建；老 token 仍有效。）
+
+4. ✅ 第 4 步 SSE 鉴权与安全决策（2026-10-06）：新增 `web/SseAuthInterceptor`——token 先取 `?token=` 再 `Authorization: Bearer`（**有值就不回退**），401 逐字 `missing token` / `invalid token`（`Errors` 增两常量）；`WebConfig` 单独注册 `/notification/stream`（**不要并进旧的 jwtAuthInterceptor 清单**）。**决策选 b**：额外做《03》白名单比对（`TokenStore.current`），登出/换发立即 401 `token has been revoked`——参考实现只验签、15 分钟内仍放行（差异已记 README §4）。验收脚本 `.ai/accept/stage8-sse-auth.sh` **9 PASS / 0 FAIL**（含"query 坏 token 不回退 header"、"登出后立即失效"两个反查；第 6/7 项第 5 步前显示 500 静态兜底属预期——已从 **spring-webmvc 7.0.9 字节码**确认资源兜底路径也走拦截器链）。`SseAuthTest` 5 用例、全量 **117/117** 绿。
+
+> 下一步：第 5 步 SseHub 与 `/notification/stream`（一个用户多条连接；每连接容量 20 有界缓冲、满即丢；断线摘除；无重连游标；30s keepalive；两个必修的坑：`new SseEmitter(0L)` 与 yml 异步超时兜底）。
 
 ## 2. 关键约定与决策（新会话必须遵守）
 

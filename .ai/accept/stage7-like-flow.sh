@@ -25,7 +25,7 @@ else
   bad "cg-video-write 不存在 —— Worker 没起"
   echo
   echo "先起 Worker（另开一个终端）："
-  echo "  ./mvnw spring-boot:run -Dspring-boot.run.main-class=io.github.p_feed.WorkerApplication"
+  echo "  ./mvnw spring-boot:run -Dmain.class=io.github.p_feed.WorkerApplication"
   echo "看到 4 行 consumer started + 'worker consumers started: 4' 后再跑本脚本。"
   exit 1
 fi
