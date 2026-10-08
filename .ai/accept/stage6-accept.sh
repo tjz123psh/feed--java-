@@ -8,6 +8,7 @@ set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1   # 从 .ai/accept/ 回到项目根
 
 export NO_PROXY="localhost,127.0.0.1,::1"; export no_proxy="$NO_PROXY"
+bash "$(dirname "$0")/_reset-rate.sh"   # 复位注册/登录限流计数器（避免脚本连跑互相 429）
 API=http://127.0.0.1:8081
 GO_API=http://127.0.0.1:8080
 DC=(docker compose -f deploy/docker-compose.yml)

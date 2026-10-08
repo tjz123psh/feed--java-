@@ -10,6 +10,7 @@
 set -u
 cd "$(dirname "$0")/../.."   # 仓库根
 export no_proxy='127.0.0.1,localhost' NO_PROXY='127.0.0.1,localhost'
+bash "$(dirname "$0")/_reset-rate.sh"   # 复位注册/登录限流计数器（避免脚本连跑互相 429）
 API=http://127.0.0.1:8081
 COMPOSE="docker compose -f deploy/docker-compose.yml"
 KAFKA="$COMPOSE exec -T kafka /opt/kafka/bin"
@@ -18,11 +19,14 @@ ok(){ echo "  PASS  $1"; }
 bad(){ echo "  FAIL  $1"; FAILS=$((FAILS+1)); }
 q(){ $COMPOSE exec -T mysql mysql -uroot -p123456 --default-character-set=utf8mb4 feedsystem -e "$1" -N -B 2>/dev/null | tail -1; }
 
-echo "== 0) 前置：Worker 在跑吗（cg-video-write 组存在 = 有消费者加入过）=="
-if $KAFKA/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group cg-video-write >/dev/null 2>&1; then
-  ok "cg-video-write 存在"
+echo "== 0) 前置：Worker 在跑吗（看 cg-video-write 的活跃成员；空组只是'存在过'，不能只看组在不在）=="
+STATE=$($KAFKA/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group cg-video-write --state 2>/dev/null)
+MEM=$(printf '%s\n' "$STATE" | awk '$1=="cg-video-write" {print $NF}' | tail -1)
+case "$MEM" in ''|*[!0-9]*) MEM=0 ;; esac
+if [ "$MEM" -gt 0 ]; then
+  ok "cg-video-write 活跃成员 $MEM 个（Worker 在跑）"
 else
-  bad "cg-video-write 不存在 —— Worker 没起"
+  bad "cg-video-write 活跃成员 0 个 —— Worker 没起（Kafka 没起也会落到这里）"
   echo
   echo "先起 Worker（另开一个终端）："
   echo "  ./mvnw spring-boot:run -Dmain.class=io.github.p_feed.WorkerApplication"

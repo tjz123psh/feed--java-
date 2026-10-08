@@ -9,6 +9,7 @@
 set -u
 cd "$(dirname "$0")/../.."   # 仓库根
 export no_proxy='127.0.0.1,localhost' NO_PROXY='127.0.0.1,localhost'
+bash "$(dirname "$0")/_reset-rate.sh"   # 复位注册/登录限流计数器（避免脚本连跑互相 429）
 API=http://127.0.0.1:8081
 COMPOSE="docker compose -f deploy/docker-compose.yml"
 FAILS=0

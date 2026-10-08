@@ -33,6 +33,9 @@ public final class Errors{
     public static final String INVALID_AUTHORIZATION_HEADER = "invalid authorization header";
     public static final String INVALID_OR_EXPIRED_TOKEN = "invalid or expired token";
     public static final String TOKEN_HAS_BEEN_REVOKED = "token has been revoked";
+    
+    //429
+    public static final String TOO_MANY_REQUESTS = "too many requests";
 
     // 500
     public static final String TITLE_IS_REQUIRED = "title is required";

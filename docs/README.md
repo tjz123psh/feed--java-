@@ -138,6 +138,14 @@ graph LR
 - **通知/SSE 一族 401 行为与参考实现不同（决策 b，2026-10-06）**：参考实现对 SSE 只做 JWT 验签，被撤销的 access token 在自然过期（≤15 分钟）前仍可连流；本实现额外做《03》白名单比对（与项目其它硬鉴权一致），登出/换发后立即 401 `token has been revoked`。与 Go 版差分测试时注意这处可观察差异。
 - **（架构事实，2026-10-07 混合部署实测）SSE 只推本进程连接**：B 的流挂在 Java（8081）、A 用 Go 版（8080）点赞 → B **收不到实时推送**，但 Java 侧 `/notification/list` 里看得到（通知由 Go 的 RabbitMQ worker 落库到共享 MySQL）。原因：SSE 连接存在谁的内存里，推送就只能由谁发出；跨进程只能靠共享存储（列表/轮询）兜底。多实例方案见《09》进阶。
 
+### 阶段 9 差异（2026-10-08 收口）
+
+- **差异清单收口**：《09》第 7 步点名项 + 各阶段差异已汇总进根 `README.md` §5（含"改进项 ↔ 对应测试"表）；本节保留各阶段的原始记录。
+- **Java 侧 Redis 2 s 命令超时约束（原版 DEL 不设超时）**：本项目全部 Redis 命令共享连接级 `spring.data.redis.timeout: 2s`（`application.yml:18`），原版 `context.Background()` 无此上限。影响：Redis 故障时读接口降级耗时 ≈ 命令数 × 2s（实测 getDetail 14.1 s / listLatest 2.0 s，`stage9-degradation.sh` 输出）。可选改进：Lettuce `disconnectedBehavior(REJECT_COMMANDS)` 把等待变快速失败（未做）。
+- **`event_id` 去重表为改进项（comment 消费与通知落库无幂等键）**：5 个事件 record 已预留 `event_id`，消费方未使用；《07》/《08》指示如实记入差异清单（现由根 `README.md` §5.1-4 承接）。
+- **补记：热度缓存失败打 `log.warn`（实现于阶段 4/5，原版静默吞）**：`VideoCacheService` 五处 Redis 失败 catch 全部 `log.warn`，仅可观测性增强、不改行为。
+- **部署约束两条（第 7 步要求写入 README）**：API 单实例（`OutboxPoller` 无认领机制，多开重复投递）；SSE 只推本进程连接（阶段 8 已实测记录）。
+
 ## 5. 术语表
 
 | 术语 | 含义 |

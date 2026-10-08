@@ -1,5 +1,6 @@
 target/
 data/uploads/
+baseline.sql
 .idea/
 *.iml
 .classpath

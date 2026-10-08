@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 阶段 8 第 7 步验收：缓存地图收口（FLUSHDB 生存性 + 点赞两键同消 + 窗口/快照实测）
 #
-# 前置（脚本自检第 0 项）：API(8081) 在跑（<leader>sr）；Worker 非必需。
+# 前置（脚本自检第 0 项）：API(8081) 在跑（<leader>sr）；Worker 在跑（点赞的两键清理与热度窗口由它消费
+#   `video-popularity` 完成——API 只在投递失败时同步兜底，Worker 缺席则第 5/6 步必红）；三容器在跑。
 # 副作用：**FLUSHDB 清空本项目 Redis**（内容全是可重建物：缓存/锁/限流计数；登录态走 DB 兜底，不受影响）；
 #   注册探针账号 A/B、插一条探针视频，结束清掉探针行（账号保留）。清空后第一波请求回源/重建，属预期。
 #
@@ -10,6 +11,7 @@
 set -u
 cd "$(dirname "$0")/../.."   # 仓库根
 export no_proxy='127.0.0.1,localhost' NO_PROXY='127.0.0.1,localhost'
+bash "$(dirname "$0")/_reset-rate.sh"   # 复位注册/登录限流计数器（避免脚本连跑互相 429）
 API=http://127.0.0.1:8081
 COMPOSE="docker compose -f deploy/docker-compose.yml"
 FAILS=0
@@ -18,9 +20,20 @@ bad(){ echo "  FAIL  $1"; FAILS=$((FAILS+1)); }
 q(){ $COMPOSE exec -T mysql mysql -uroot -p123456 --default-character-set=utf8mb4 feedsystem -e "$1" -N -B 2>/dev/null | tail -1; }
 r(){ $COMPOSE exec -T redis redis-cli --no-auth-warning -a 123456 "$@" 2>/dev/null | tr -d '\r'; }
 
-echo "== 0) 前置：API 健康 =="
+echo "== 0) 前置：API 健康 + Worker 在跑 =="
 CODE=$(curl -s -m 3 --noproxy '*' -o /dev/null -w '%{http_code}' $API/healthz)
 if [ "$CODE" = "200" ]; then ok "healthz 200"; else bad "healthz=$CODE（API 没起？<leader>sr）"; exit 1; fi
+STATE=$($COMPOSE exec -T kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group cg-video-write --state 2>/dev/null)
+MEM=$(printf '%s\n' "$STATE" | awk '$1=="cg-video-write" {print $NF}' | tail -1)
+case "$MEM" in ''|*[!0-9]*) MEM=0 ;; esac
+if [ "$MEM" -gt 0 ]; then
+  ok "Worker 在跑（cg-video-write 活跃成员 $MEM）"
+else
+  bad "Worker 没起（cg-video-write 活跃成员 0；Kafka 没起也会落到这里）—— 两键清理与热度窗口靠它消费 video-popularity"
+  echo "     另开一个终端起 Worker：./mvnw spring-boot:run -Dmain.class=io.github.p_feed.WorkerApplication"
+  echo "     看到 'worker consumers started: 4' 后再跑本脚本"
+  exit 1
+fi
 
 echo "== 1) 探针账号 A、B（先拿好 token，再做 FLUSHDB 验 DB 兜底）=="
 UA="sse7a_$(date +%s)"; UB="sse7b_$(date +%s)"

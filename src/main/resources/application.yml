@@ -1,5 +1,6 @@
 server:
   port: 8081
+  shutdown: graceful #受到推出信号后先处理完在途请求
 
 spring:
   datasource:
@@ -33,6 +34,16 @@ spring:
       # Jackson 3 默认开启 FAIL_ON_NULL_FOR_PRIMITIVES：请求体里缺 int/long 字段会 500。
       # 原版（Go）缺字段按零值处理（如 limit 缺省 → 归一成 10、as_of 缺省 → 用当前分钟），所以关掉它。
       fail-on-null-for-primitives: false
+      
+  lifecycle:
+    timeout-per-shutdown-phase: 2s
+    
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+        
 feed:
   redis:
     key-prefix: "v1:"

@@ -1,12 +1,12 @@
 # WORKING.md —— Feed-Java 项目 AI 交接文档
 
-> **给 AI 的说明**：换模型 / 换会话 / 压缩后，先读本文件，再读 `docs/README.md`，然后以 Git 状态、源码和测试为准核验。本文件由模型随时更新（用户在规则中已授权"模型觉得需要写入就写入"），每次关键步骤结束应顺手刷新。最后更新：2026-10-07。
+> **给 AI 的说明**：换模型 / 换会话 / 压缩后，先读本文件，再读 `docs/README.md`，然后以 Git 状态、源码和测试为准核验。本文件由模型随时更新（用户在规则中已授权"模型觉得需要写入就写入"），每次关键步骤结束应顺手刷新。最后更新：2026-10-08。
 
 ## 0. 项目一句话
 
 `/home/pang/Projects/Feed stream/feed-java`：用 **Java 21 + Spring Boot 4.0.8 + MyBatis-Plus 3.5.17 + mysql-connector-j 9.7.0** 从零重写仿抖音短视频 Feed 系统（Go 原版 `feedsystem_video_go-main`）。接口契约、表结构、缓存 key、错误文案全在 `docs/` 12 份中文文档里，**不需要读 Go 源码**，按文档实现即可。项目根下的 `.ai/WORKING.md` 是 AI 交接入口，`docs/README.md` §1.5 定义每步输出结构。
 
-## 1. 当前进度（核验日期：2026-10-07，`mvnw test` 131/131 绿；含 4 条 Java↔Go 互通用例——Go 版不在线时它们自动 skip，其余 127 条不受影响）
+## 1. 当前进度（核验日期：2026-10-08，`mvnw test` 135/135 绿；4 条 Java↔Go 互通用例需 Go 在线，离线时自动 skip→131 passed）
 
 ### 阶段 2 · 环境与工程骨架 —— ✅ 已完成
 
@@ -131,7 +131,28 @@
 
 **阶段 8（Redis 缓存与 SSE 实时通知）到此全部收工：第 1~8 步 ✅，全量 131/131 绿（Go 离线时 4 条互通自动 skip→127），六本验收脚本入库（notif-read / sse-auth / sse-stream / notification-flow / cache-map / interop-mixed）。**
 
-> 下一步：《09-限流与收尾验收》（全项目最后一份：限流器落位 + 收尾验收）。
+### 阶段 9 · 限流与收尾验收 —— 🚧 进行中（2026-10-07 开工）
+
+1. ✅ 第 1 步 规则表核对（2026-10-07）：`RateLimits.java` 五条与《09》表逐格一致；`WebConfig` 的 8 个 URI 挂载与注册顺序（jwt 在限流之前）也已就位——**两者都无需改动**。
+2. ✅ 第 2 步 限流拦截器（2026-10-07）：`infra/RateLimiter` + `RedisRateLimiter`（Lua：INCR + 仅 `count==1` 时 PEXPIRE、毫秒参数；key 逐字 `feedsystem:ratelimit:{规则}:{对象}`，全项目唯一无 `v1:` 前缀；Redis 不可用 fail-open）+ `RateLimitConfig`（五条规则=五个 Bean，方法名=规则名，Map 注入）+ `RateLimitInterceptor` 整装（URI→规则表；IP=remoteAddr 不信 XFF；账号=accountID 取不到即跳过）；429 `{"error":"too many requests"}` 无 Retry-After；`Errors` 增 429 常量。**集成坑（全量套件抓出）**：计数器与线上共享 Redis，套件一轮注册几十号 → `account_register`（5/小时）被打穿到 38 → 33 条 429 红、还会锁死用户手测一小时；修法 = `feed.ratelimit.enabled` 门控（测试默认 false、`RateLimitTest` 单独 true、生产 `matchIfMissing` 照常）。`RateLimitTest` 4 用例、全量 **135/135（4 skip）** 绿。
+3. ✅ 第 3 步 真 429 验收（2026-10-07）：`.ai/accept/stage9-ratelimit.sh` **9 PASS / 0 FAIL**——序列 10×400→429、响应体逐字、无 Retry-After、TTL ∈(0,60] 且**只递减不重置**；脚本结束复位计数器。
+4. ✅ 第 4 步 错误契约/空集合审计（2026-10-07 扫查）：Go 语料 `56` 条（+service 层 `52` 条）与《09》数字一致，语料存 `.ai/go-error-corpus.txt` 供矩阵用；Java 侧：Errors 常量 61 条、**无**手写 JSON error、**无** null 列表泄漏、`List.of()` 空列表兜底 11 处；状态码走《03》路线 B（修正态）全项目一致。空集合 8 处交给第 6 步矩阵逐条断言。
+
+5. ✅ 第 5 步 观测面与优雅停机（2026-10-07~08）：yml 三处（`server.shutdown: graceful`、`spring.lifecycle.timeout-per-shutdown-phase: 2s`、顶层 `management` 只暴露 health,metrics）；脚本 `.ai/accept/stage9-observability.sh` **4 PASS / 0 FAIL**；手动 Ctrl-C 实测出现「Commencing graceful shutdown」+「Graceful shutdown complete」，消费者逐个 `consumer closed` 干净退出。Boot 4 的 `/actuator` `_links` 里 `health-path`/`metrics-requiredMetricName` 是 health/metrics 的子链接、不是多开的端点（`EndpointLinksResolver: Exposing 2 endpoints` 佐证）。
+
+6. ✅ 第 6 步 自测矩阵（2026-10-08 全绿）：`.ai/accept/stage9-matrix.sh` 已建并真跑三轮（前置 → `./mvnw test` → 快验收 → 降级/全停 → 10 行总表；失败留日志、退出码=FAIL 数）。
+   - **脚本连跑打穿注册限流**：cache-map 的探针注册吃了 429 → 新增 `.ai/accept/_reset-rate.sh`（DEL 两个按 IP 的计数器），9 本会注册的脚本 + 矩阵每步前调用。
+   - **cache-map 三红 = Worker 没在跑**（run 2 诊断，证据链完整）：点赞投递成功时「DEL 两键 + ZINCRBY 分钟窗口」**由 Worker 的 `PopularityConsumer`（cg-video-write）消费 `video-popularity` 完成**，API 侧只在投递失败时同步兜底；Worker 缺席 → 事件堆在 Kafka（实测：组 `Empty`/0 members、like-events 与 video-popularity 各积压 3 条）→ 两键不删、窗口不写、merge 快照"空并集不建键"（已实测 `ZUNIONSTORE` 全空源 → `EXISTS`=0）「没出现」。**修复**：矩阵第 0 步 + cache-map 第 0 步 + `stage7-like-flow.sh` 第 0 步统一加「cg-video-write 有活跃成员」硬门槛（组存在≠有成员，原 like-flow 检查看走眼过）；矩阵第 2 步顺带纳入 `stage7-like-flow.sh`（Worker 已是硬前置，其落库/计数/LAG/DLQ 断言正好补上 Kafka 异步行的端到端）。
+   - **degradation 窗口放宽**：Redis 挂时 getDetail 实测 **14.1s**（7 条 Redis 命令 ×Lettuce 2s 超时）、listLatest 2.0s——降级行为正确，脚本改 `-m 25` 并打印耗时；可选优化（未做）：Lettuce `disconnectedBehavior(REJECT_COMMANDS)` 把等待变快速失败。
+   - **第三轮（2026-10-08）全绿 = 《09》通过标志达成**：前置三项（API / 三容器 / Worker 成员 4）PASS、suite 135/135、七本快验收（notif-read、sse-auth、notification、like-flow、cache-map、ratelimit、observability）全 PASS、degradation（Redis 挂 fail-open + 详情/Feed 降级 + 三件全停 /healthz 200）PASS，总表 0 项失败。
+
+7. 🚧 第 7 步 交付（2026-10-08 进行中）：
+   - **压测**（本机无 `ab`，用 `loadtest`——同工具、同参数、两版同时在线、共享同一 MySQL/Redis；每端点预热 300 后 `-n 1000 -c 50` 两轮取第二轮）：getDetail Java P50 12 / P95 31 ms / 3690 rps ↔ Go P50 13 / P95 19 ms / 3650 rps；listLatest Java P50 14 / P95 33 ms / 3195 rps ↔ Go P50 12 / P95 24 ms / 3636 rps。吞吐与中位数同量级（瓶颈=每请求建连+序列化，不在 JVM），Go 尾部略低（Tomcat 线程模型）；预热轮 P95 明显更差（JIT，Java getDetail 49 / listLatest 87 ms）。数字与解释已写进根 README §4。
+   - **根 `README.md` 已建**（《09》第 7 步交付物）：架构图 + 部署约束两条 + 启动步骤（含 `cd deploy && docker compose up -d`、`bash deploy/create-topics.sh`）+ 测试/验收脚本表 + 差异清单收口（《09》点名 10 项逐条 + 各阶段 §4 汇总 + 改进项↔测试）+ 压测 + 已知限制。差异清单由 `swarm-explorer`（task `s9-diff-audit`，11 组事项逐条取证）审计后合并，关键条已抽样复核。
+   - **基线 dump**：`baseline.sql`（576 KB，mysqldump，仓库根；未提交）。测试数据未清（accounts 1984 / videos 7 等，多为探针，保 baseline 留档）。
+   - 待办：用户过目 README/差异清单 → Git 分阶段提交 + 补 tag `v1.0-java-rewrite`（用户操作）。
+
+> 下一步：用户审 README/差异清单 → 收尾（提交 + tag）；之后选修第 8 步（Go 差分，Go 8080 与 RabbitMQ 已在跑）或第 9 步（前端连通）。
 
 ## 2. 关键约定与决策（新会话必须遵守）
 
