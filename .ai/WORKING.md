@@ -150,9 +150,10 @@
    - **压测**（本机无 `ab`，用 `loadtest`——同工具、同参数、两版同时在线、共享同一 MySQL/Redis；每端点预热 300 后 `-n 1000 -c 50` 两轮取第二轮）：getDetail Java P50 12 / P95 31 ms / 3690 rps ↔ Go P50 13 / P95 19 ms / 3650 rps；listLatest Java P50 14 / P95 33 ms / 3195 rps ↔ Go P50 12 / P95 24 ms / 3636 rps。吞吐与中位数同量级（瓶颈=每请求建连+序列化，不在 JVM），Go 尾部略低（Tomcat 线程模型）；预热轮 P95 明显更差（JIT，Java getDetail 49 / listLatest 87 ms）。数字与解释已写进根 README §4。
    - **根 `README.md` 已建**（《09》第 7 步交付物）：架构图 + 部署约束两条 + 启动步骤（含 `cd deploy && docker compose up -d`、`bash deploy/create-topics.sh`）+ 测试/验收脚本表 + 差异清单收口（《09》点名 10 项逐条 + 各阶段 §4 汇总 + 改进项↔测试）+ 压测 + 已知限制。差异清单由 `swarm-explorer`（task `s9-diff-audit`，11 组事项逐条取证）审计后合并，关键条已抽样复核。
    - **基线 dump**：`baseline.sql`（576 KB，mysqldump，仓库根；未提交）。测试数据未清（accounts 1984 / videos 7 等，多为探针，保 baseline 留档）。
-   - 待办：用户过目 README/差异清单 → Git 分阶段提交 + 补 tag `v1.0-java-rewrite`（用户操作）。
+   - ✅ Git 收尾（2026-10-08）：全部改动一笔提交 `1ef6a51`（28 文件，+931/−10，沿用「阶段8完成」粒度）+ 附注 tag `v1.0-java-rewrite`；工作区干净。顺带修复：OS 重装后 git 全局身份丢失导致提交被拦，已按历史恢复为 `pang <2803834833@qq.com>`（`--global`）。
+   - 待办：用户过目 README/差异清单。
 
-> 下一步：用户审 README/差异清单 → 收尾（提交 + tag）；之后选修第 8 步（Go 差分，Go 8080 与 RabbitMQ 已在跑）或第 9 步（前端连通）。
+> 下一步（均可选）：第 9 步 前端连通（主线最后一步：`VITE_API_TARGET` 三行 + 真实用户终验）；或第 8 步 Go 差分（Go 8080 与 RabbitMQ 在线）。后台实例：Java 8081 + Go 8080 在跑，Worker 未起。
 
 ## 2. 关键约定与决策（新会话必须遵守）
 
