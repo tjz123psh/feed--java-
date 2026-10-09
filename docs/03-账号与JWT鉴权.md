@@ -7,7 +7,7 @@
 
 ## 第 1 步 · 建 accounts 表
 
-原版 GORM 启动时 AutoMigrate 自动建表，Java 版用 MyBatis-Plus **不建表**，所以每个阶段第一件事是自己建表。进容器：`cd deploy && docker compose exec -it mysql mysql -uroot -p123456 feedsystem`，把下面整段粘进去执行（MySQL 8 语法）：
+本项目用 MyBatis-Plus **不建表**（也没有引入自动迁移工具），所以每个阶段第一件事是自己建表。进容器：`cd deploy && docker compose exec -it mysql mysql -uroot -p123456 feedsystem`，把下面整段粘进去执行（MySQL 8 语法）：
 
 ```sql
 CREATE TABLE `accounts` (
@@ -24,7 +24,7 @@ CREATE TABLE `accounts` (
 ```
 
 验证：`SHOW TABLES;` 期望列出 `accounts`；`SHOW CREATE TABLE accounts\G` 期望看到 `uni_accounts_username`。
-两句解释：`username` 用 varchar(191) 是 utf8mb4 下唯一索引受 767 字节限制；`password`/`token`/`refresh_token` 是 longtext（GORM 的 string 默认映射），Java 侧实体写 `String` 即可。
+两句解释：`username` 用 varchar(191) 是 utf8mb4 下唯一索引受 767 字节限制；`password`/`token`/`refresh_token` 是 longtext，Java 侧实体写 `String` 即可。
 列名转驼峰不用配：MyBatis-Plus 的 `MybatisConfiguration` 在构造里就把 `mapUnderscoreToCamelCase` 设为 true；它也不是 Spring 的键——真要用必须写顶层 `mybatis-plus:` 前缀，嵌在 `spring:` 下会被静默忽略，所以本工程哪一步都不写这个键。
 
 再补两件本阶段就要用的配置。签名密钥写进 `application.yml` 的 `feed:` 段（《02》第 7 步预告过这件事），并在 `AppProps` 里加一个嵌套 record `Jwt(String secret)`：
@@ -71,16 +71,16 @@ public final class RateLimits {
 | `/account/uploadAvatar` | JWT | multipart 字段 `file` | `{"avatar_url":"http://{Host}/static/avatars/{uid}/{随机hex+原扩展名}"}` |
 
 失败文案逐字：旧密码错 → **400** `unsuccessfully password changed`；updateProfile 两字段全空 → `nothing to update`；
-rename 重名 → **409** `username already exists`（这句人话文案只有 rename 有）。头像三段校验逐字：400 `missing file`（没有 `file` 字段）；400 `invalid file size`（大小 ≤0 或超过 10 MB——**空文件与超大共用同一句**）；400 `only .jpg/.jpeg/.png/.webp allowed`（扩展名转小写后比）。登录态取不到 accountID → 401 + `accountID not found`；建目录 / 存盘 / 写库失败 → 500 + 底层错误原文（原版没有统一的"处理失败"文案）。
+rename 重名 → **409** `username already exists`（这句人话文案只有 rename 有）。头像三段校验逐字：400 `missing file`（没有 `file` 字段）；400 `invalid file size`（大小 ≤0 或超过 10 MB——**空文件与超大共用同一句**）；400 `only .jpg/.jpeg/.png/.webp allowed`（扩展名转小写后比）。登录态取不到 accountID → 401 + `accountID not found`；建目录 / 存盘 / 写库失败 → 500 + 底层错误原文。
 其余业务失败（**登录时**的用户不存在、密码错、**注册**重名）状态码是 **500**、error 文案是底层错误原文——这是历史约定。
-> **注意细分，别笼统并进 500 组**：`findByID` / `findByUsername` 的"查无此人"走 `gorm.ErrRecordNotFound` →
-> **404** `record not found`（error 原文就是这个哨兵错误）；`getProfile` 的查找失败才是 500 原文。
-> **例外（照抄，别并进 500 组）**：`/account/refresh` 失败固定 **401** `{"error":"invalid refresh token"}`——
-> 原版 Refresh 的 service 层失败全部折叠成这一条（token 为空、缓存/库里值不等、全表扫无匹配、签发或落库失败）。
-> 唯一例外：请求体本身解析不了（`ShouldBindJSON` 报错）走通用映射 → 500 + 原始错误。前端对 401 有自动刷新逻辑，这条尤其不能改。
+> **注意细分，别笼统并进 500 组**：`findByID` / `findByUsername` 的"查无此人" →
+> **404** `record not found`（`error` 原文就是这个哨兵文案）；`getProfile` 的查找失败才是 500 原文。
+> **例外（别并进 500 组）**：`/account/refresh` 失败固定 **401** `{"error":"invalid refresh token"}`——
+> service 层失败全部折叠成这一条（token 为空、缓存/库里值不等、反查无匹配、签发或落库失败）。
+> 唯一例外：请求体本身解析不了走通用映射 → 500 + 原始错误。前端对 401 有自动刷新逻辑，这条尤其不能改。
 
 **决策点：错误状态码（现在就选定，后面全程一致）**
-- **A 严格对齐**：上面说的 500 全保留（login 用户不存在/密码错、注册重名），`findByID`/`findByUsername` 查无 404。适合想跑差异测试的人。
+- **A 严格按契约表**：上面说的 500 全保留（login 用户不存在/密码错、注册重名），`findByID`/`findByUsername` 查无 404。
 - **B 语义修正**：登录失败 400、**注册**重名 409（refresh 的 401、findByID/findByUsername 的 404 保持不动，本来就这样）。**红线：登录失败不得用 401**——前端对 401
   有专门分支（自动刷 token 重试，`client.ts:66`），401 会凭空触发刷新流程。
 别混用；无论选哪个，都在 `docs/README.md` 的差异说明处记一行（最终收口见《09》第 7 步的差异清单）。
@@ -105,7 +105,7 @@ rename 重名 → **409** `username already exists`（这句人话文案只有 r
 | `v1:refresh:{token}` | accountID 十进制串（反查索引） | 7 d |
 
 三条铁律（后面每步都按它写）：① **验签在查缓存之前**（顺序反了=可拿任意签名 token 冒充探测）；
-② **写序先库后缓存**，缓存失败不回滚库操作、只记日志；③ Redis 值一律 **StringRedisTemplate 裸字符串**——用默认 JDK 序列化器的 RedisTemplate 会写进乱码字节，阶段 8 与参考实现互读缓存时必炸。
+② **写序先库后缓存**，缓存失败不回滚库操作、只记日志；③ Redis 值一律 **StringRedisTemplate 裸字符串**——用默认 JDK 序列化器的 RedisTemplate 会写进乱码字节，阶段 8 跨实例互读缓存时必炸。
 **通过标志**：能答出"为什么登出的 token 立刻失效""为什么同一账号只能有一个登录态"。
 
 ## 第 4 步 · 加两个依赖，写出 auth 与 account 的地基
@@ -123,7 +123,7 @@ rename 重名 → **409** `username already exists`（这句人话文案只有 r
 
 ## 第 5 步 · 写注册、登录、登出三个接口
 
-- **register**：重名 → 500 + 底层错误原文（原版注册没有预检查，直接撞 MySQL 1062 把原始错误回吐；`username already exists` 是 rename 的 409 文案）；成功 → `{"message":"account created"}`。
+- **register**：重名 → 500 + 底层错误原文（注册没有预检查，直接撞 MySQL 1062 把原始错误回吐；`username already exists` 是 rename 的 409 文案）；成功 → `{"message":"account created"}`。
 - **login**：按 username 查库 → bcrypt 比对 → 签发两 token → **先 UPDATE 库两列，再 SET 三键**（缓存失败只记日志，不影响登录）。
 - **logout**：删三键 + 清两列，返回 `{"message":"account logged out"}`。
 
@@ -162,7 +162,7 @@ reg.addInterceptor(rateLimit).addPathPatterns("/account/login", "/account/regist
 
 ## 第 7 步 · 写 refresh 与 changePassword（两个免鉴权接口）
 
-- **refresh**：`v1:refresh:{token}` 反查账号（miss 时按 `refresh_token` 列查库——原版全表扫是坏做法，你直接建列查询，记差异）
+- **refresh**：`v1:refresh:{token}` 反查账号（miss 时按 `refresh_token` 列查库）
   → 与库中值相等 → 只签**新 access token**，写库写缓存；响应的 `refresh_token` 是**空串**（第 2 步契约，保持）。
 - **changePassword**：旧密码错 → 400 `unsuccessfully password changed`；成功 → `{"message":"successfully password changed"}`，
   并且**自动执行 logout**（删三键清两列，全端下线）。
@@ -182,8 +182,8 @@ reg.addInterceptor(rateLimit).addPathPatterns("/account/login", "/account/regist
 
 ## 第 9 步 · 写 findByID / findByUsername / getProfile
 
-三个都免鉴权：前两个返回 `{id, username, bio?, avatar_url?}`（空字段省略）；`getProfile` 的 `account_id` 传 0 或缺失 → **400** `account_id is required`（原版这条是路由内联校验，`router.go:149-151`）；
-**getProfile 的四个计数**实时 COUNT/SUM（videos、socials、likes），任一失败 → 该字段记 0 不报错（原版行为，保持）；本阶段 `videos`、`socials`、`likes` 三张表都还没有（`videos` 到《04》第 1 步才建），正好验证"失败记 0"这条容错路径。
+三个都免鉴权：前两个返回 `{id, username, bio?, avatar_url?}`（空字段省略）；`getProfile` 的 `account_id` 传 0 或缺失 → **400** `account_id is required`；
+**getProfile 的四个计数**实时 COUNT/SUM（videos、socials、likes），任一失败 → 该字段记 0 不报错（保持这一容错约定）；本阶段 `videos`、`socials`、`likes` 三张表都还没有（`videos` 到《04》第 1 步才建），正好验证"失败记 0"这条容错路径。
 验证：`curl -s --noproxy '*' -XPOST $H/account/getProfile -H "$J" -d '{"account_id":1}' | jq 'keys'`。
 **通过标志**：输出含 `account` 与四个 `*_count`，进程不抛异常栈。
 
@@ -229,10 +229,6 @@ bash -c 'for i in $(seq 1 12); do curl -s --noproxy "*" -o /dev/null -w "%{http_
 ```
 
 ## 卡住了看这里
-
-**Java 验签 Go 签的 token 失败。**
-原因：两边 `JWT_SECRET` 不一致。
-处理：统一环境变量；这是阶段 9 差异测试的基础设施。
 
 **Redis 里 token 值带引号或乱码。**
 原因：用了 JDK 序列化器的 RedisTemplate。

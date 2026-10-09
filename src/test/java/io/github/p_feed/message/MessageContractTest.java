@@ -85,7 +85,7 @@ class MessageContractTest {
     void send_trimsContent_andAcceptsUnknownRecipient() throws Exception {
         Probe a = registerAndLogin();
 
-        // content 前后空白会被 trim 后落库（原版 repo.Send 的 strings.TrimSpace）
+        // content 前后空白会被 trim 后落库
         String raw = "  padded-" + UUID.randomUUID().toString().substring(0, 8) + "  ";
         mockMvc.perform(post("/message/send")
                         .header("Authorization", "Bearer " + a.token())

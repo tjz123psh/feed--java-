@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-/** 热榜响应：as_of=0 表示"这页走的是 DB 兜底"；三个 next_latest_* 为空时键不出现（对齐 Go 的 omitempty） */
+/** 热榜响应：as_of=0 表示"这页走的是 DB 兜底"；三个 next_latest_* 为空时键不出现（NON_NULL 会省略空键） */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ListByPopularityResponse(
         @JsonProperty("video_list") List<FeedVideoItem> videoList,

@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 第 4 步 SSE 鉴权契约：
  * token 先取查询参数 ?token= 再看 Authorization；401 文案逐字 missing token / invalid token；
  * 查询参数优先（有值就用，坏了也不回退）。
- * 决策 b（白名单）：登出后的 token 立刻 401 token has been revoked（参考实现此时仍放行）。
+ * 白名单：登出后的 token 立刻 401 token has been revoked。
  * 第 5 步之前 /notification/stream 没有 handler，本测试只覆盖"被拦截"的分支（不会开流）。
  */
 @SpringBootTest(classes = ApiApplication.class)

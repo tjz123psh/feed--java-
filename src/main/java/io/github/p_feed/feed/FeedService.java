@@ -105,7 +105,7 @@ public class FeedService {
 
     // 点赞榜：排序 like_count Desc ,id Desc
     // 游标四条校验文案逐字（全 400）；两个都为 0 = 第一页。
-    // has_more = 本页装满（原版语义）；next_* 取本页最后一条。
+    // has_more = 本页装满（契约语义）；next_* 取本页最后一条。
     public LikesCountResponse listLikesCount(
             int limit, Long likesCountBefore, Long idBefore, long viewerAccountId) {
         int normalized = normalizeLimit(limit);
@@ -312,8 +312,8 @@ public class FeedService {
     }
 
     /**
-     * allowRebuild: 只允许重建一次窗口。原版靠递归重入且无深度上限（ZADD 失败还会被忽略）， 一旦 ZADD 持续失败就会无限递归 —— 这里第二次进来窗口仍为空就直接走
-     * DB 兜底。
+     * allowRebuild: 只允许重建一次窗口。第二次进来窗口仍为空就直接走 DB 兜底，
+     * 避免 ZADD 持续失败时无限递归。
      */
     private ListLatestResponse loadLatest(
             int normalized, Long reqTime, long viewerAccountId, boolean allowRebuild) {
@@ -383,7 +383,7 @@ public class FeedService {
                 merged.addAll(cold);
                 videos = merged;
             } catch (RuntimeException e) {
-                // 原版把 stitch 的错误吞掉返回短页，这里保留但记日志
+                // stitch 失败：吞掉错误返回短页，但记日志
                 log.warn(
                         "stitch failed, return short page: remain={}, err={}",
                         remain,

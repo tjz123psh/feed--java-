@@ -141,7 +141,7 @@ class LikesCountPagingTest {
         assertThat(withZeros.nextIdBefore()).isEqualTo(firstPage.nextIdBefore());
     }
 
-    /** 空页：next_* 两个键不出现（对齐 Go 的 omitempty） */
+    /** 空页：next_* 两个键不出现 */
     @Test
     void emptyPage_omitsNextCursorKeys() throws Exception {
         String json = new tools.jackson.databind.ObjectMapper().writeValueAsString(

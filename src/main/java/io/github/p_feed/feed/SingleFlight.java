@@ -8,7 +8,7 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 /**
  * 进程内请求合并（第 9 步）：同一个 key 上的并发调用只执行一次 loader，其余等它的结果。
- * key 只存在于这张 map 里，永远不写 Redis（原版 sf:fallback:/sf:cold:/sf:stitch: 同理）。
+ * key 只存在于这张 map 里，永远不写 Redis。
  * 必须是单例 bean —— 每次 new 一个就等于没有合并。
  */
 @Component

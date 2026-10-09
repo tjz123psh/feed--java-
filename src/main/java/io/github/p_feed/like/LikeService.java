@@ -57,7 +57,7 @@ public class LikeService {
 
             // 同一事务：写行 + 两个计数。
             // insertIgnore 返回 false = 唯一索引拦下（并发下预检漏掉的重复请求），
-            // 此时绝不能加计数——等价于原版"dup key → 事务回滚"。
+            // 此时绝不能加计数——唯一索引拦下即整个事务回滚。
             boolean inserted = likeMapper.insertIgnore(videoId, accountId);
             if (!inserted) {
                 throw new ApiException(

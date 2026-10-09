@@ -34,7 +34,7 @@ if [ "$CODES" = " 400 400 400 400 400 400 400 400 400 400 429 429" ]; then ok "�
 echo "== 2) 429 的响应体与响应头（第 13 次） =="
 RESP=$(curl -s --noproxy '*' -i -XPOST $API/account/login -H 'content-type: application/json' -d '{"username":"ct_rl_probe","password":"x"}')
 if echo "$RESP" | grep -q '{"error":"too many requests"}'; then ok "响应体逐字 {\"error\":\"too many requests\"}"; else bad "响应体不对：$(echo "$RESP" | tail -1)"; fi
-if echo "$RESP" | grep -qi "retry-after"; then bad "不该有 Retry-After 头"; else ok "没有 Retry-After 头（照抄原版）"; fi
+if echo "$RESP" | grep -qi "retry-after"; then bad "不该有 Retry-After 头"; else ok "没有 Retry-After 头（契约要求）"; fi
 
 echo "== 3) 计数与 TTL =="
 V=$(r GET "$KEY"); T1=$(r TTL "$KEY")

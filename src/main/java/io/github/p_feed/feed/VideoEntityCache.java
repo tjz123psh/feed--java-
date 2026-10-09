@@ -53,7 +53,7 @@ public class VideoEntityCache {
     private final Cache<String, Video> l1 =
             Caffeine.newBuilder().maximumSize(L1_MAX_SIZE).expireAfterWrite(L1_TTL).build();
 
-    // 原版 sf:entity:{id} 的进程内版本：同 id 并发时只有领头者查库，其余等它的结果
+    // inFlight 表：同 id 并发时只有领头者查库，其余等它的结果
     public final ConcurrentHashMap<Long, CompletableFuture<Video>> inFlight =
             new ConcurrentHashMap<>();
 
@@ -141,7 +141,7 @@ public class VideoEntityCache {
                 Thread.currentThread().interrupt();
                 return null;
             }catch(Exception e){
-                return null;   // 领头者失败 → 本 id 静默缺失，与原版一致
+                return null;   // 领头者失败 → 本 id 静默缺失
             }
         }
 

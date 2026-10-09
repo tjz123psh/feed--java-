@@ -1,7 +1,7 @@
 # 阶段 8 · Redis 缓存与 SSE 实时通知
 
 > **本阶段做什么**：实现站内通知（SSE 实时推送 + 列表 / 已读 / 未读数）和私信；
-> 再把前 7 个阶段散落的缓存行为收口成一张地图，做一次跨实现的缓存兼容验证。
+> 再把前 7 个阶段散落的缓存行为收口成一张地图，做一次跨实例的缓存兼容验证。
 > **做完能演示**：B 的浏览器不刷新就看到"A 赞了你"；红点、已读、私信会话页可用；缓存地图逐项打勾。
 > **开工前确认**：Kafka 与 MySQL 在跑（第 1 步要建 `messages` 表）；《07》第 2 步表格里声明的消费者组
 > `cg-notification` 已声明但还没接消费。只要《07》第 6 步把 `auto.offset.reset=earliest` 配上了，
@@ -9,7 +9,7 @@
 > 没配 earliest 的话新组从"现在"开始读，**存量读不到**，改用自己现场造事件即可（两种都能验收，别等积压）。
 > **预计用时**：2-3 天。
 
-一句架构事实，本阶段后面所有决定都由它派生：参考实现把**通知消费者 + 内存 Hub + 推送**全放在 API 进程里——
+一句架构事实，本阶段后面所有决定都由它派生：**通知消费者 + 内存 Hub + 推送**全放在 API 进程里——
 SSE 连接存在谁的内存里，推送就只能由谁发出。
 SSE（Server-Sent Events）是浏览器原生的"服务端单向长连接推送"，本质是一个永不结束的 HTTP 响应。
 
@@ -21,7 +21,7 @@ SSE（Server-Sent Events）是浏览器原生的"服务端单向长连接推送"
 cd deploy && docker compose exec -it mysql mysql -uroot -p123456 feedsystem
 ```
 
-粘贴执行（与原版 GORM 建出来的结构逐字一致，这样两边可以共用同一个库）：
+粘贴执行（表结构即契约）：
 
 ```sql
 CREATE TABLE `messages` (
@@ -72,7 +72,7 @@ CREATE TABLE `messages` (
 | `POST /message/send` | `{to_id, content}` | 200 返回 **Message 实体本身**（`{id,from_id,to_id,content,is_read,created_at}`）；`to_id=0` 或 content trim 后为空 → 400 `to_id and content are required` |
 | `POST /message/list` | `{peer_id}` | `{"messages":[...]}`，条件 `(我→他) OR (他→我)`，`created_at DESC LIMIT 50`，空为 `[]`；`peer_id` 为 0 → **400** `peer_id is required` |
 
-两条既定事实照抄：**不校验收件人是否存在**（发给不存在的 id 也返回 200，写进差异清单）；
+两条既定事实：**不校验收件人是否存在**（发给不存在的 id 也返回 200，写进差异清单）；
 `from_id` 只信登录态，不信请求体。
 
 ```bash
@@ -97,10 +97,10 @@ VALUES (1, 2, 'like', 1, '点赞了你的视频', NOW(3));
 | `POST /notification/markRead` | `{id}` 或空 body / `{}` | 传 id 标单条，省略则标全部；`{"message":"ok"}` |
 | `POST /notification/unreadCount` | `{}` | `{"count": n}`——响应字段名逐字 `count` |
 
-三个读接口若从上下文取不到 accountID → **401** `invalid account`（原版 `worker/ssehub.go` 里三处都是这一句）。
+三个读接口若从上下文取不到 accountID → **401** `invalid account`（三个接口都是这一句）。
 
 `markRead` 标单条时 `WHERE id = ? AND recipient_id = ?`——只能标自己收件箱里的。
-空 body 要宽容：`@RequestBody(required = false)`（参考实现把空 body 视为"标全部"）。
+空 body 要宽容：`@RequestBody(required = false)`（把空 body 视为"标全部"）。
 
 **通过标志**：三条 curl 依次返回带刚插入通知的列表 → `{"message":"ok"}` → `{"count":0}`。
 
@@ -110,12 +110,12 @@ SSE 组单独一个拦截器：token **先取查询参数 `?token=`**，取不�
 原因很实际——浏览器的 `EventSource` 不能设自定义请求头，只能塞进 URL。
 鉴权失败响应体逐字：401 `{"error":"missing token"}`（没带 token）/ 401 `{"error":"invalid token"}`（验签或过期失败）。
 
-> **警告（安全事实，要自己决策）**：参考实现的 SSE 校验**只做 JWT 验签与过期判断**，
-> **不查《03》的 token 白名单**（不比对 `v1:account:{id}` 当前值）。
-> 后果：登出时被"撤销"的 access token，在自然过期（**15 分钟**）前**仍可访问通知与 SSE**（这一族只验签）。
+> **警告（安全事实，要自己决策）**：如果 SSE 校验**只做 JWT 验签与过期判断**、
+> **不查《03》的 token 白名单**（不比对 `v1:account:{id}` 当前值），
+> 那么登出时被"撤销"的 access token，在自然过期（**15 分钟**）前**仍可访问通知与 SSE**。
 > 别把这句话扩大到私信：`/message/*` 挂的是《03》那套**带白名单比对**的硬鉴权，登出后立刻 401 `token has been revoked`。
-> 决策点：a) 严格照抄（差分测试友好）；b) 加上白名单校验（更安全）。
-> **推荐 b)**，并把"通知类 401 行为两版预期不同"记进差异清单。
+> 决策点：a) 只验签（实现更简单）；b) 加上白名单校验（与项目其它硬鉴权一致，更安全）。
+> **推荐 b)**，并把"通知类 401 行为"记进差异清单。
 
 **通过标志**：无 token 连 `/notification/stream` → 401 `missing token`；乱 token → 401 `invalid token`。
 
@@ -177,7 +177,7 @@ spring:
 ```
 
 > 说明：如果你加了压缩过滤器或反向代理，确认 `/notification/stream` **不缓冲**
-> （可对照原版 `frontend/nginx.conf` 给 `/static/` 关闭 buffering 的写法）。自行攒包的 Filter 是首号嫌疑人。
+> （确保对该路径关闭 buffering/压缩）。自行攒包的 Filter 是首号嫌疑人。
 
 **通过标志**：`curl -sN "http://localhost:8081/notification/stream?token=$B"` 挂住不断，
 什么都不做时 35 秒内看到一行 `: keepalive`；`Ctrl-C` 后服务端日志显示该连接被摘除。
@@ -187,7 +187,7 @@ spring:
 消费者处理每条消息只有五步（`consumers/NotificationConsumer.java`，复用《07》第 6 步的 `AbstractConsumer`，包路径与《07》相同）：
 
 1. 按 action 过滤：只处理 `like` / `publish` / `follow`，unlike、delete、unfollow 不产生通知。
-2. 关键字段为 0 就跳过，而且**三类事件看的字段不一样**（照抄原版 `notificationworker.go`）：like 查 `user_id`/`video_id`、comment 查 `author_id`/`video_id`、follow 查 `follower_id`/`vlogger_id`。
+2. 关键字段为 0 就跳过，而且**三类事件看的字段不一样**：like 查 `user_id`/`video_id`、comment 查 `author_id`/`video_id`、follow 查 `follower_id`/`vlogger_id`。
 3. 查 `videos` 取 `author_id` 作为收件人（follow 不查库，收件人 = `vlogger_id`）。
 4. **操作者 = 作者则跳过**（自己赞自己不发通知）；作者为 0（视频已删）同样跳过。
 5. `INSERT notifications` → `hub.push(收件人, 通知)`。
@@ -203,7 +203,7 @@ A 点赞 → API 发布 like-events → cg-notification（API 进程内）→ �
 ```
 
 > 说明：`mention` 不在这条链路上——评论服务同步直写 DB（《05》的 @ 解析与直写），
-> 不经 Kafka、不推 SSE，在线用户要下次打开列表才看到。设计不统一是既定事实，照抄。
+> 不经 Kafka、不推 SSE，在线用户要下次打开列表才看到。两套路径不一致是既定事实，保持一致即可。
 
 **通过标志**：A 赞 B 的视频 → 3 秒内 B 的流上出现 `data: {"type":"like",...}`；
 A 赞自己的视频 → 不产生任何通知；把 Worker 进程（落库组 `cg-video-write`）杀掉再点赞 →
@@ -227,14 +227,14 @@ A 赞自己的视频 → 不产生任何通知；把 Worker 进程（落库组 `
 
 **通过标志**：`FLUSHDB` 之后通知与私信仍全部可用（本域不依赖缓存）；点一次赞，detail 与 entity 两键同时消失。
 
-## 第 8 步 · 与参考实现的互通验证
+## 第 8 步 · 缓存序列化契约验证
 
-前提：你按《00》第 6 节把原版跑在 8080，两边连**同一个** MySQL 与 Redis。三条都做完，
-说明你的缓存序列化与原版真正兼容：
+同一个 Redis 可能被多个实例共用（混合部署、多实例扩容），缓存 value 的序列化必须稳定可互读。三条都做完，
+说明缓存序列化在跨实例场景下真正兼容：
 
-- [ ] `SharedCacheCompatTest`：Java 写 `v1:video:detail:*` → 参考实现读出，反向再跑一次，两边响应一致且无解码错误。
-- [ ] `listByFollowing` 页缓存 value（内含游标与 `is_liked`）双向互读。
-- [ ] 混合部署剧本（验证的是架构事实，不是 bug）：B 的 SSE 连 8081，A 用参考实现（8080）点赞 →
+- [ ] `SharedCacheCompatTest`：写一份 `v1:video:detail:*` → 用与生产一致的 `ObjectMapper` 读出，值逐字段一致且无解码错误；把读到的值再写回、再读出，两轮往返一致。
+- [ ] `listByFollowing` 页缓存 value（内含游标与 `is_liked`）做同样的往返验证。
+- [ ] 多实例剧本（验证的是架构事实，不是 bug）：B 的 SSE 连实例 1，A 用实例 2 点赞 →
       B **收不到实时推送**，但 `/list` 里能看到。把这条写进 README：SSE 只推本进程连接（多实例方案见《09》进阶）。
 
 ## 本阶段验收清单
@@ -279,12 +279,12 @@ curl -s --noproxy '*' -XPOST :8081/message/send -H "Authorization: Bearer $A" -d
 
 **`markRead` 用 Postman 发 `{}` 正常、发空 body 报 400。**
 原因：Spring 的 `@RequestBody` 默认 required=true。
-处理：`@RequestBody(required = false)`——参考实现对空 body 是宽容的（视为标全部）。
+处理：`@RequestBody(required = false)`——对空 body 要宽容（视为标全部）。
 
-**互读 detail 缓存时抛 `DateTimeParseException`。**
-原因：参考实现写的时间带 `+08:00` 偏移，Java 侧字段用了 `LocalDateTime`。
+**读 detail 缓存时抛 `DateTimeParseException`。**
+原因：缓存里写的时间带 `+08:00` 偏移，Java 侧字段用了 `LocalDateTime`。
 处理：统一 `OffsetDateTime` + `JavaTimeModule`；这是共享缓存契约的一部分，全项目排查一遍。
 
-**前端指向 8081 后收不到任何推送。**
-原因：SSE 的 URL 仍拼着 8080（store 里的 base 没跟着换）。
+**前端联调后收不到任何推送。**
+原因：SSE 的 URL 拼的 base 不对（store 里的 base 与 Vite 代理目标不一致）。
 处理：grep 前端 `notification/stream` 的拼接处，或干脆改用完整 URL 的 env 变量。

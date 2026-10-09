@@ -71,7 +71,7 @@ class FeedServiceTest {
                 .contains("\"likes_count\":3")
                 .contains("\"author\"");
 
-        // description 空则键不出现（对齐 Go 的 omitempty）
+        // description 空则键不出现
         String noDesc = new tools.jackson.databind.ObjectMapper().writeValueAsString(
                 new FeedVideoItem(1L, new FeedAuthor(2L, "u"), "t", null, "p", "c", 1756814652L, 3L, false));
         assertThat(noDesc).doesNotContain("\"description\"");

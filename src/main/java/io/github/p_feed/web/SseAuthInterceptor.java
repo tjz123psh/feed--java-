@@ -62,7 +62,7 @@ public class SseAuthInterceptor implements HandlerInterceptor {
 
         Long accountId = decoded.getClaim("account_id").asLong();
 
-        // 决策 b）：参考实现只验签；这里补《03》白名单比对，登出/换发后立即失效//
+        // 白名单比对：登出/换发后立即失效；仅验签会放任旧 token 到自然过期
         String currentToken = tokenStore.current(accountId);
         if(currentToken == null || !currentToken.equals(token)){
             return reject(response, HttpStatus.UNAUTHORIZED, Errors.TOKEN_HAS_BEEN_REVOKED);

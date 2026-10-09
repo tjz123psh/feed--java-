@@ -66,7 +66,7 @@ class RateLimitTest {
                 .andReturn();
 
         assertThat(blocked.getResponse().getContentAsString())
-                .as("429 响应体逐字（照抄原版）")
+                .as("429 响应体文案逐字固定")
                 .isEqualTo("{\"error\":\"too many requests\"}");
     }
 

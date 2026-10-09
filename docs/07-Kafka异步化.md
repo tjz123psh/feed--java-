@@ -36,7 +36,7 @@ flowchart LR
 
 一句话读法：发送方只管"发出去"，Worker 进程慢慢消费落库；同一条消息可以被不同的**消费者组**各消费一次
 （上图里 `cg-video-write` 落库、`cg-notification` 发通知），这就是 Kafka 的扇出，
-不需要像原版 RabbitMQ 那样为一个用途建一个队列。消费失败的消息进 `.dlq`（死信队列）等人工看。
+不需要为一个用途建一个队列。消费失败的消息进 `.dlq`（死信队列）等人工看。
 
 ---
 
@@ -204,7 +204,7 @@ public record AppProps(Redis redis, Jwt jwt, Kafka kafka, Outbox outbox) {
 | `max.block.ms` | **2000** | 管住 `send()` 本身的阻塞（元数据获取 + 缓冲区分配） |
 | `delivery.timeout.ms` | **2000** | 管住"发出后等确认"的总时长，和 retries/l.ms 一起构成上界 |
 | `request.timeout.ms` | 1000 | 单次请求超时，必须 ≤ `delivery.timeout.ms` |
-| `acks` | 1 | 对齐原版宽松语义（不等全副本确认） |
+| `acks` | 1 | 宽松语义：投递不等全副本确认 |
 | `retries` | 3 | 与 `delivery.timeout.ms` 一起限制重试窗口 |
 | `enable.idempotence` | false | 见下面那条说明 |
 
@@ -263,7 +263,7 @@ void publishLikeReachable() {   // 起一个 kafka-console-consumer 在别的终
 3. JSON 解析失败：不重试，直接进 DLQ。
 4. 进程收到退出信号：停止 poll，处理完在途消息再 commit 退出。
 
-消费者构造参数只有三个键需要你想清楚（其余照抄）：
+消费者构造参数只有三个键需要你想清楚（其余键用固定值）：
 
 | 参数 | 值 | 为什么 |
 |------|-----|--------|
@@ -300,8 +300,7 @@ void publishLikeReachable() {   // 起一个 kafka-console-consumer 在别的终
 
 **本阶段最容易做错的一步：把《05》的同步写改成"只在投递失败时兜底"。**
 不改就是双计——同一条点赞既走 `updatePopularityCache`（DEL 两键 + ZINCRBY），又被 `PopularityConsumer` 再 ZINCRBY 一次。
-原版的形状是"两件事各自投递、都成功就直接返回"（`like_service.go` 里 `mysqlEnqueued` / `redisEnqueued` 两个标记），
-Java 侧照搬：
+形状是"两件事各自投递、都成功就直接返回"（两个布尔标记各记一条投递结果），照此实现：
 
 ```java
 // 文件：io.github.p_feed.like.LikeService（已有类：把 like(…) 方法主体改写为下方形状）
@@ -338,7 +337,7 @@ docker compose -f deploy/docker-compose.yml exec kafka \
 
 ## 第 8 步 · Outbox：视频发布时间线的投递与消费
 
-原版链路是"发布事务写一行 `outbox_msgs`（status='pending'）→ 后台投递 → 删行"，你照做：
+链路是"发布事务写一行 `outbox_msgs`（status='pending'）→ 后台投递 → 删行"：
 
 - `mq/OutboxPoller.java`（API 进程，`@Scheduled`，`fixedDelayString` 读 `feed.outbox.fixed-delay-ms`）：
   每 1000ms 取 `status='pending'` 按 `create_time` 升序 LIMIT 100 → 逐条 produce 到 `video-timeline`

@@ -8,7 +8,7 @@
 >   （《03》《04》《05》各自的第 1 步建的）——第 1 步会用 `SHOW TABLES;` 核对，少一张就是前面跳了步。
 > - 已有的类：硬 JWT 鉴权拦截器（《03》）、`RedisKeys`（《02》第 10 步）、限流规则表 `infra/RateLimits.java`（《03》第 1 步）、
 >   热度三件套 `updatePopularityCache`（《05》第 9 步，热榜要读它写的窗口）、detail 缓存那套"锁 + double check"模式（《04》）。
-> - 数据：库里已有一批测试视频和互动数据（跑过《00》第 6 节可直接复用原版数据；没跑过就用自己前几阶段攒的视频、评论、点赞，够用就行）。
+> - 数据：库里已有一批测试视频和互动数据（用自己前几阶段攒的视频、评论、点赞，够用就行）。
 > **预计用时**：2-3 天。
 >
 > Feed 流是"短视频系统"这个词里的本义，五种列表的取数策略各不相同。本阶段的收获不是代码量，而是三种分页思想：
@@ -136,7 +136,7 @@ WHERE (a < :a0) OR (a = :a0 AND id < :id0)
 `POST /feed/listLikesCount`（软鉴权）：请求 `{limit, likes_count_before?, id_before?}`，
 响应 `next_likes_count_before?, next_id_before?, has_more`，游标单位是**整数**（不是时间）。
 
-校验细节（原版逐条文案，全部 **400**，差分测试要按字断言）：
+校验细节（逐条文案，全部 **400**，契约测试要按字断言）：
    - 只传 `likes_count_before` 或只传 `id_before` → `likes_count_before and id_before must be provided together`
    - `likes_count_before < 0` → `invalid cursor: likes_count_before must be >= 0`
    - `id_before <= 0` → `invalid cursor: id_before must be > 0`
@@ -153,7 +153,7 @@ WHERE (a < :a0) OR (a = :a0 AND id < :id0)
 
 1. SQL：`author_id IN (SELECT vlogger_id FROM socials WHERE follower_id=我)` + `create_time < 游标`（单位：**秒**）+ DESC + LIMIT。
    **纯拉模型**——发视频不写任何粉丝的收件箱（全局 ZSET 只服务推荐流，这就是本项目"推拉结合"的取舍）。
-2. 整页响应缓存：**只有登录用户才缓存**（原版判据是 `viewerAccountID != 0`，匿名请求每次直查 DB）。
+2. 整页响应缓存：**只有登录用户才缓存**（判据是登录态 viewer 账号非 0，匿名请求每次直查 DB）。
    键的完整模板是 `v1:feed:listByFollowing:limit={limit}:accountID={id}:before={秒}`（首屏 `before=0`），TTL **24 h**，value 是整页响应 JSON。SCAN 失效时用前缀模式即可。
    miss 时抢分布式锁（TTL **500 ms**）+ double check + 5×20 ms 轮询——与《04》detail 缓存同一套模式，
    只是缓存对象换成了整个响应 JSON。注意 **500 ms 是 Feed 页的锁**，阶段 4 详情锁是 2 s，别混。
@@ -182,11 +182,11 @@ L3  每个 miss 的 id 一个任务：
 最后按输入 id 顺序重排输出（找不到的 id 静默缺失）
 ```
 
-实现要点：L1 用 Caffeine `maximumSize(2000).expireAfterWrite(5s)`（**L1 的 5 秒以本篇为准**；原版用 go-cache 也是每次写入显式 5 秒 TTL，语义接近，不用为了对齐改）；
+实现要点：L1 用 Caffeine `maximumSize(2000).expireAfterWrite(5s)`（**L1 的 5 秒以本篇为准**：每次写入显式 5 秒 TTL）；
 L2 是 Redis MGET `v1:video:entity:{id}`（String，TTL **1 h**，value 是 Video 实体 JSON，RFC3339 时间），
 单次 **50 ms** 超时，超时即视为 miss 下沉 L3；L3 每个 miss 的 id 一个任务（虚拟线程或固定线程池均可），
 singleflight 用 `ConcurrentHashMap<Long, CompletableFuture<Video>>` + `computeIfAbsent` + finally remove，
-> 说明：原版给这些去重键拼了 `sf:entity:{id}`、`sf:cold:listLatest:{limit}:{reqTime}`、`sf:stitch:listLatest:{n}:{ts}`、`sf:fallback:global_timeline_rebuild` 这样的字符串——它们是**进程内 map 的键**，从不写进 Redis。所以《08》的缓存地图里没有它们，`redis-cli --scan` 也扫不到；别照着它们去建 Redis 键。
+> 说明：这些去重键（`sf:entity:{id}`、`sf:cold:listLatest:{limit}:{reqTime}`、`sf:stitch:listLatest:{n}:{ts}`、`sf:fallback:global_timeline_rebuild`）都是**进程内 map 的键**，从不写进 Redis。所以《08》的缓存地图里没有它们，`redis-cli --scan` 也扫不到；别照着它们去建 Redis 键。
 按 `sf:entity:{id}` 把同 id 并发合并成一次查库。
 
 本阶段只新增一个依赖（版本由 Boot BOM 托管，**不写 `<version>`**）：
@@ -213,7 +213,7 @@ flowchart TD
     COL --> ORD["按输入 id 顺序重排输出"] --> OUT["返回结果（缺失 id 静默不返回）"]
 ```
 
-缓存 value 是 **Video 实体的 JSON**（字段与 tag 见《04》），所以 Java 与参考实现会互读互写，序列化兼容性在《08》统一测试。
+缓存 value 是 **Video 实体的 JSON**（字段与 tag 见《04》），跨实例会互读互写这份 JSON，序列化兼容性在《08》统一测试。
 **验证**：并发合并单测——100 并发 miss 只打 1 次库。**通过标志**：该单测绿；三级全 miss 时结果顺序与输入 id 顺序一致。
 
 ## 第 9 步 · 推荐流 `listLatest`：冷热分离的时间线（本阶段最难的一段）
@@ -257,7 +257,7 @@ flowchart TD
 
 `POST /feed/listByPopularity`（软鉴权）：请求 `{limit, as_of, offset, latest_popularity, latest_before, latest_id_before?}`，
 响应除了 `video_list` 还有 `as_of, next_offset, has_more, next_latest_*`；`as_of` 与 `latest_before` 是**秒 / RFC3339 字符串**两套单位。
-校验：`latest_popularity < 0` → **400** `latest_popularity must be >= 0`（`feed/handler.go:138-139`，原版少数写死 400 的校验之一）。
+校验：`latest_popularity < 0` → **400** `latest_popularity must be >= 0`（少数写死 400 的校验之一）。
 
 数据源是《05》热度三件套里的 `updatePopularityCache`：它一直在往 `v1:hot:video:1m:{yyyyMMddHHmm}` 做 `ZINCRBY`（TTL 2 h）。
 
@@ -270,7 +270,7 @@ flowchart TD
    按 ZSET 顺序重排 → 组页。
 5. 响应同时给两套游标：Redis 路径的 `{as_of, next_offset}`，以及 DB 兜底所需的三元游标
    `{next_latest_popularity, next_latest_before, next_latest_id_before}`。
-6. 三分支要分清（照抄原版 `feed/service.go` 的控制流）：
+6. 三分支要分清（按这个控制流实现）：
    - ZREVRANGE **报错** → 走 DB 三元游标兜底，响应 `as_of=0`（0 就是"我在走兜底"的标记）；
    - **读成功但结果为空且 offset>0** → 直接返回空页：`video_list=[]`、`as_of` 保持真实值、`next_offset=offset`、`has_more=false`，**不进 DB**；
    - 读成功但结果为空且 offset==0（首页）→ 才落 DB（`as_of=0`）。
@@ -299,37 +299,33 @@ flowchart LR
 # cd deploy && docker compose exec -T redis redis-cli --no-auth-warning -a 123456 FLUSHDB → 五种流仍全部 200（全走 DB 降级），再逐步把窗口/缓存喂回来
 ```
 
-**通过标志**：`FLUSHDB` 之后五种流全部 200，逐个恢复后走缓存路径——参考实现就是这样，逐项对齐。
+**通过标志**：`FLUSHDB` 之后五种流全部 200，逐个恢复后走缓存路径，逐项对齐。
 
 ## 本阶段验收清单
 
-可选差异测试（与参考实现并行双跑，测试账号两边分开用，避免互踢；没跑过阶段 0 可跳过）：
-
 ```bash
-# 1) 同一匿名请求（无 Authorization 头）分别打 8080 / 8081，五种流各翻 3 页：
-#    video_list 的 id 序列、has_more 序列一致
-# 2) 新关注一个博主后，其视频立即出现在自己关注流第一页（证明 SCAN 失效真的删到了）
-# 3) 对某视频疯狂点赞 → 热榜第一页 1 分钟内不变 → 跨分钟后排名更新
-# 4) FLUSHDB 后五种流全部仍 200（全走 DB 降级）
-# 5) limit 传 0 / 51 → 实际返回 10 条；listLikesCount 只传一个游标字段 → 400
-# 6) 三级缓存：100 并发只产生 1 次查库；Redis 挂掉时 listLatest 走 DB 且仍 200
+# 1) 新关注一个博主后，其视频立即出现在自己关注流第一页（证明 SCAN 失效真的删到了）
+# 2) 对某视频疯狂点赞 → 热榜第一页 1 分钟内不变 → 跨分钟后排名更新
+# 3) FLUSHDB 后五种流全部仍 200（全走 DB 降级）
+# 4) limit 传 0 / 51 → 实际返回 10 条；listLikesCount 只传一个游标字段 → 400
+# 5) 三级缓存：100 并发只产生 1 次查库；Redis 挂掉时 listLatest 走 DB 且仍 200
 ```
 
-六条全绿 = 阶段 6 完成。异步化（把第 2 步的消息发布器换成真链路、让第 9 步那个 ZSET 由消费者维护）在《07》。
+五条全绿 = 阶段 6 完成。异步化（把第 2 步的消息发布器换成真链路、让第 9 步那个 ZSET 由消费者维护）在《07》。
 
 ## 卡住了看这里
 
 **翻页永远返回第一页。** 原因：游标单位搞错（毫秒当秒用），或者前端回传字段名拼错。
 处理：对照第 6~10 步各自的单位；用 `TTL` / 日志看请求值。
 
-**与参考实现的 `listLatest` 顺序不同。** 原因：热窗口里同一毫秒有多条，ZSET 按 member 字典序断 ties；
-DB 冷拼接部分对不上。原因不是精度——`videos.create_time` 两边都是 `datetime(3)`（毫秒），差的是**时区偏移**：Go 驱动按 `loc=Local` 读写，Java 侧若用 `LocalDateTime` 就丢了偏移。处理：先比 id 集合再比顺序；实体统一 `OffsetDateTime`（见《04》第 1 步与《08》序列化契约）。
+**`listLatest` 翻页顺序偶发与预期不同。** 原因：热窗口里同一毫秒有多条，ZSET 按 member 字典序断 ties；
+DB 冷拼接部分同样可能出现等值时序不稳定。另一个常见坑是**时区偏移**：`videos.create_time` 是 `datetime(3)`（毫秒），Java 侧若用 `LocalDateTime` 就丢了偏移。处理：先比 id 集合再比顺序；实体统一 `OffsetDateTime`（见《04》第 1 步与《08》序列化契约）。
 
-**is_liked 全 false（明明点过赞）。** 原因：软鉴权拦截器没把 viewer id 放进 request 属性，或属性名与参考实现不一致。
+**is_liked 全 false（明明点过赞）。** 原因：软鉴权拦截器没把 viewer id 放进 request 属性，或属性名前后不一致。
 处理：从 interceptor 断点查起，这是 plumbing bug 而非逻辑 bug。
 
 **关注流缓存 24 h，刚关注的博主刷不到。** 原因：忘了实现 SCAN 失效，或 key 模式与第 7 步写下的模式不一致。
 处理：`cd deploy && docker compose exec -T redis redis-cli --no-auth-warning -a 123456 --scan --pattern 'v1:feed:listByFollowing:*'` 先看 key 形状再修。
 
-**读参考实现写的 entity 缓存直接反序列化异常。** 原因：Video JSON 的 `create_time` 是 RFC3339 带时区偏移，Jackson 默认不认。
-处理：`JavaTimeModule` + `ADJUST_DATES_TO_CONTEXT_TIME_ZONE=false`；《08》会把这类兼容测试系统化，先按能跑处理。
+**读缓存里的 entity JSON 直接反序列化异常。** 原因：Video JSON 的 `create_time` 是 RFC3339 带时区偏移，Jackson 默认不认。
+处理：`JavaTimeModule` + `ADJUST_DATES_TO_CONTEXT_TIME_ZONE=false`；《08》会把这类序列化兼容测试系统化，先按能跑处理。

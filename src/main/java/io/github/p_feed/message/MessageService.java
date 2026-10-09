@@ -38,7 +38,7 @@ public class MessageService {
         messageMapper.insert(message);
         return message;
     }
-   // 会话：最新 50 条；空会话兜底成 []（沿用原版 nil→[] 的语义）
+   // 会话：最新 50 条；空会话兜底成 []
     public MessageListResponse list(long accountId, ListMessagesRequest req){
         if(req.peerId() == null || req.peerId() == 0L){
             throw new ApiException(HttpStatus.BAD_REQUEST, Errors.PEER_ID_IS_REQUIRED);

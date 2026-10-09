@@ -25,9 +25,9 @@ class FilesToolTest {
     void toUrl_usesHostHeaderAndStaticPrefix() {
         Path file = tool.resolvePath("videos", 7L, true, ".mp4");
         MockHttpServletRequest req = new MockHttpServletRequest();
-        req.addHeader("Host", "example.com:8080");
+        req.addHeader("Host", "example.com:9000");
         assertThat(tool.toUrl(req, file))
-                .startsWith("http://example.com:8080/static/videos/7/");
+                .startsWith("http://example.com:9000/static/videos/7/");
     }
 
     @Test

@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 第 5 步验收：三种游标各翻页"不重不漏"。
  * 数据：A 组 30 条探针（create_time 互不相同、likes_count 互不相同、popularity 每 3 条并列）
  *      + B 组 2 条（popularity 与 create_time 都完全相同，只能靠主键 id 兜底）。
- * 注意：纯时间游标（A 组断言）不追加 id，同时间的行可能丢——这是原版取舍，
+ * 注意：纯时间游标（A 组断言）不追加 id，同时间的行可能丢——这是契约取舍，
  * 所以 B 组只参与三元游标的断言。
  */
 @SpringBootTest(classes = ApiApplication.class)

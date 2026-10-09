@@ -18,10 +18,10 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * 分块会话的唯一 Redis 出入口（第 7/8/9 步）。 两个键：会话键存 JSON、hash 键存裸 upload_id；TTL 都是 24h。 错误映射（对齐原版
- * chunk_handler.go 的响应语义）： - 连接类异常（Redis 真挂了） → 503 chunk upload requires redis（我们的增强，原版此处是
- * 404/500） - 键查不到 → 返回 null，由 Service 给 404 upload session not found - 会话 JSON 坏了 → 404 invalid
- * session data（原版语义） - 写会话失败（非连接类） → 500 failed to create/update session
+ * 分块会话的唯一 Redis 出入口（第 7/8/9 步）。 两个键：会话键存 JSON、hash 键存裸 upload_id；TTL 都是 24h。 错误映射： -
+ * 连接类异常（Redis 真挂了） → 503 chunk upload requires redis - 键查不到 → 返回 null，由 Service 给 404 upload
+ * session not found - 会话 JSON 坏了 → 404 invalid session data - 写会话失败（非连接类） → 500 failed to
+ * create/update session
  */
 @Component
 public class ChunkSessionStore {
