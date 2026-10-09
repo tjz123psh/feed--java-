@@ -3,6 +3,7 @@ import { onUnmounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
+import Icon from '../components/Icon.vue'
 import { ApiError } from '../api/client'
 import * as videoApi from '../api/video'
 import type { Video } from '../api/types'
@@ -75,6 +76,16 @@ function pickCover(e: Event) {
   publishForm.cover = input.files?.[0] ?? null
 }
 
+function onDropVideo(e: DragEvent) {
+  const f = e.dataTransfer?.files?.[0]
+  if (f) publishForm.video = f
+}
+
+function onDropCover(e: DragEvent) {
+  const f = e.dataTransfer?.files?.[0]
+  if (f) publishForm.cover = f
+}
+
 function openVideoPicker() {
   videoInput.value?.click()
 }
@@ -97,6 +108,10 @@ function resetProgress() {
   uploadProgress.uploadedBytes = 0
   uploadProgress.totalBytes = 0
   uploadProgress.percent = 0
+}
+
+function formatMB(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 // Compute file md5 by reading in 2MB chunks
@@ -230,15 +245,15 @@ async function onPublish() {
   const title = publishForm.title.trim()
   const description = publishForm.description.trim()
   if (!title) {
-    toast.error('请输入 title')
+    toast.error('请输入视频标题')
     return
   }
   if (!publishForm.video) {
-    toast.error('请选择视频文件（.mp4）')
+    toast.error('请选择要上传的视频文件（.mp4）')
     return
   }
   if (!publishForm.cover) {
-    toast.error('请选择封面图片（jpg/png/webp）')
+    toast.error('请选择封面图片（jpg / png / webp）')
     return
   }
 
@@ -282,99 +297,118 @@ async function onPublish() {
 
 <template>
   <AppShell>
-    <div class="publish-wrap">
-      <div class="card publish-card">
-        <div class="row" style="justify-content: space-between; align-items: baseline">
-          <p class="title" style="margin: 0">发布视频</p>
-          <div v-if="busy" class="pill">进行中：{{ stage || '…' }}</div>
+    <div class="page">
+      <div class="page-inner" style="--page-max: 640px">
+        <header class="head">
+          <h1 class="page-title">发布视频</h1>
+          <p class="page-sub">上传本地视频与封面，分块续传，发布到推荐流</p>
+        </header>
+
+        <div v-if="published" class="done" role="status">
+          <span class="done-icon"><Icon name="check" :size="18" /></span>
+          <div class="done-text">
+            <p class="done-title">「{{ published.title }}」已发布</p>
+            <p class="done-sub">视频已进入推荐流</p>
+          </div>
+          <div class="done-actions">
+            <RouterLink class="btn btn--primary" :to="`/video/${published.id}`">去播放</RouterLink>
+            <button class="btn btn--ghost" type="button" @click="published = null">继续发布</button>
+          </div>
         </div>
-        <p class="subtle" style="margin-top: 10px">选择视频文件与封面图片，上传到本机后自动生成 URL，再写入 `/video/publish`。</p>
 
-        <div class="grid form-grid" style="margin-top: 16px">
-          <div>
-            <label>title</label>
-            <input v-model.trim="publishForm.title" class="big-input" :disabled="busy" />
-          </div>
-          <div>
-            <label>description</label>
-            <textarea v-model.trim="publishForm.description" class="big-input" :disabled="busy" />
-          </div>
-          <div class="grid two">
-            <div>
-              <label>video (.mp4)</label>
-              <input ref="videoInput" class="file-native" type="file" accept="video/mp4" :disabled="busy" @change="pickVideo" />
-              <div class="file-box">
-                <button type="button" :disabled="busy" @click="openVideoPicker">选择视频</button>
-                <div class="file-name" :class="publishForm.video ? '' : 'muted'">
-                  {{ publishForm.video ? publishForm.video.name : '未选择文件' }}
-                </div>
-                <button v-if="publishForm.video" type="button" :disabled="busy" @click="clearVideo">清除</button>
-              </div>
-              <div v-if="publishForm.video" class="subtle" style="margin-top: 6px">
-                已选择：{{ publishForm.video.name }}（{{ Math.ceil(publishForm.video.size / 1024 / 1024) }} MB）
-              </div>
-            </div>
-            <div>
-              <label>cover (jpg/png/webp)</label>
-              <input
-                ref="coverInput"
-                class="file-native"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                :disabled="busy"
-                @change="pickCover"
-              />
-              <div class="file-box">
-                <button type="button" :disabled="busy" @click="openCoverPicker">选择封面</button>
-                <div class="file-name" :class="publishForm.cover ? '' : 'muted'">
-                  {{ publishForm.cover ? publishForm.cover.name : '未选择文件' }}
-                </div>
-                <button v-if="publishForm.cover" type="button" :disabled="busy" @click="clearCover">清除</button>
-              </div>
-              <div v-if="publishForm.cover" class="subtle" style="margin-top: 6px">已选择：{{ publishForm.cover.name }}</div>
-            </div>
+        <div class="form">
+          <div class="field">
+            <label for="pub-title">标题</label>
+            <input id="pub-title" v-model.trim="publishForm.title" type="text" placeholder="一句话描述你的视频" :disabled="busy" />
           </div>
 
-          <!-- Upload progress bar -->
-          <div v-if="busy && uploadProgress.totalBytes > 0" class="progress-wrap">
+          <div class="field">
+            <label for="pub-desc">简介<span class="opt">（可选）</span></label>
+            <textarea id="pub-desc" v-model.trim="publishForm.description" placeholder="补充说明，支持话题 #tag" :disabled="busy" />
+          </div>
+
+          <div class="field">
+            <span class="field-label">视频文件</span>
+            <input ref="videoInput" class="sr-only" type="file" accept="video/mp4" :disabled="busy" @change="pickVideo" />
+            <div
+              class="dropzone"
+              :class="{ filled: !!publishForm.video, disabled: busy }"
+              role="button"
+              tabindex="0"
+              aria-label="选择视频文件"
+              @click="!busy && openVideoPicker()"
+              @keydown.enter.prevent="!busy && openVideoPicker()"
+              @keydown.space.prevent="!busy && openVideoPicker()"
+              @dragover.prevent
+              @drop.prevent="!busy && onDropVideo($event)"
+            >
+              <template v-if="!publishForm.video">
+                <Icon name="upload" :size="22" />
+                <span class="drop-title">点击选择或拖入视频</span>
+                <span class="drop-sub">.mp4，最大 200 MB</span>
+              </template>
+              <template v-else>
+                <Icon name="film" :size="22" />
+                <span class="drop-title">{{ publishForm.video.name }}</span>
+                <span class="drop-sub">{{ formatMB(publishForm.video.size) }}</span>
+              </template>
+            </div>
+            <button v-if="publishForm.video && !busy" class="link-btn" type="button" @click="clearVideo">移除视频</button>
+          </div>
+
+          <div class="field">
+            <span class="field-label">封面</span>
+            <input ref="coverInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" :disabled="busy" @change="pickCover" />
+            <div
+              class="dropzone"
+              :class="{ filled: !!publishForm.cover, disabled: busy }"
+              role="button"
+              tabindex="0"
+              aria-label="选择封面图片"
+              @click="!busy && openCoverPicker()"
+              @keydown.enter.prevent="!busy && openCoverPicker()"
+              @keydown.space.prevent="!busy && openCoverPicker()"
+              @dragover.prevent
+              @drop.prevent="!busy && onDropCover($event)"
+            >
+              <template v-if="!publishForm.cover">
+                <Icon name="image" :size="22" />
+                <span class="drop-title">点击选择或拖入封面图</span>
+                <span class="drop-sub">jpg / png / webp，最大 10 MB</span>
+              </template>
+              <template v-else>
+                <img v-if="preview.coverUrl" class="drop-thumb" :src="preview.coverUrl" alt="封面预览" />
+                <span class="drop-title">{{ publishForm.cover.name }}</span>
+              </template>
+            </div>
+            <button v-if="publishForm.cover && !busy" class="link-btn" type="button" @click="clearCover">移除封面</button>
+          </div>
+
+          <div v-if="preview.videoUrl" class="preview">
+            <span class="field-label">视频预览</span>
+            <video class="preview-video" :src="preview.videoUrl" controls playsinline preload="metadata" />
+          </div>
+
+          <div v-if="busy && uploadProgress.totalBytes > 0" class="progress" role="status">
+            <div class="progress-top">
+              <span>{{ stage || '处理中' }}</span>
+              <span class="mono">{{ uploadProgress.percent }}%</span>
+            </div>
             <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: uploadProgress.percent + '%' }"></div>
+              <div
+                class="progress-fill"
+                :style="{ transform: `scaleX(${uploadProgress.percent / 100})` }"
+              />
             </div>
-            <div class="progress-text">
-              {{ (uploadProgress.uploadedBytes / 1024 / 1024).toFixed(1) }} MB /
-              {{ (uploadProgress.totalBytes / 1024 / 1024).toFixed(1) }} MB
-              ({{ uploadProgress.percent }}%)
-            </div>
+            <p class="progress-sub">
+              {{ formatMB(uploadProgress.uploadedBytes) }} / {{ formatMB(uploadProgress.totalBytes) }}
+            </p>
           </div>
 
-          <div v-if="preview.coverUrl || preview.videoUrl" class="grid two">
-            <div v-if="preview.videoUrl" class="preview-card">
-              <div class="subtle">视频预览</div>
-              <video class="video" :src="preview.videoUrl" controls playsinline preload="metadata" />
-            </div>
-            <div v-if="preview.coverUrl" class="preview-card">
-              <div class="subtle">封面预览</div>
-              <img class="cover" :src="preview.coverUrl" alt="cover preview" />
-            </div>
-          </div>
-
-          <div class="row" style="justify-content: flex-end; margin-top: 8px">
-            <button class="primary big-btn" type="button" :disabled="busy" @click="onPublish">发布</button>
-          </div>
-        </div>
-
-        <div v-if="published" class="card" style="margin-top: 14px">
-          <p class="title">已发布</p>
-          <div class="row" style="justify-content: space-between">
-            <div>
-              <div class="title" style="margin: 0">{{ published.title }}</div>
-              <div class="subtle mono">#{{ published.id }}</div>
-            </div>
-            <div class="row">
-              <RouterLink class="pill" :to="`/video/${published.id}`">去播放</RouterLink>
-              <a class="pill mono" :href="published.play_url" target="_blank" rel="noreferrer">play_url</a>
-              <a class="pill mono" :href="published.cover_url" target="_blank" rel="noreferrer">cover_url</a>
-            </div>
+          <div class="submit">
+            <button class="btn btn--primary btn--lg btn--block" type="button" :disabled="busy" @click="onPublish">
+              {{ busy ? `${stage || '处理中'}…` : '发布' }}
+            </button>
           </div>
         </div>
       </div>
@@ -383,135 +417,186 @@ async function onPublish() {
 </template>
 
 <style scoped>
-.publish-wrap {
-  display: grid;
-  justify-items: center;
+.head {
+  margin-bottom: var(--sp-6);
 }
 
-.publish-card {
-  width: min(980px, 100%);
-  padding: 22px;
-}
-
-.form-grid {
-  gap: 16px;
-}
-
-.form-grid .grid.two {
-  gap: 20px;
-}
-
-.form-grid .grid.two > * {
-  min-width: 0;
-}
-
-.form-grid input[type='file'] {
-  max-width: 100%;
-}
-
-.file-native {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.file-box {
+.done {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  min-height: 46px;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-6);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
 }
 
-.file-box button {
-  padding: 8px 10px;
-  border-radius: 12px;
+.done-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-full);
+  background: rgba(52, 211, 153, 0.16);
+  color: var(--success);
 }
 
-.file-name {
+.done-text {
   flex: 1;
   min-width: 0;
+}
+
+.done-title {
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.done-sub {
+  margin-top: 2px;
+  font-size: var(--text-meta);
+  color: var(--text-2);
+}
+
+.done-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.form {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.field {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+label,
+.field-label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.opt {
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    background var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
+}
+
+.dropzone:hover,
+.dropzone:focus-visible {
+  border-color: var(--brand);
+  background: var(--brand-dim);
+  color: var(--text);
+}
+
+.dropzone.filled {
+  border-style: solid;
+}
+
+.dropzone.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.drop-title {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--text);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.88);
 }
 
-.muted {
-  color: rgba(255, 255, 255, 0.55);
+.drop-sub {
+  font-size: var(--text-caption);
+  color: var(--text-3);
 }
 
-.big-input {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 100%;
-  padding: 12px 14px;
-  font-size: 14px;
-  border-radius: 14px;
-}
-
-.big-btn {
-  padding: 12px 18px;
-  font-size: 14px;
-  border-radius: 14px;
-}
-
-.preview-card {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 16px;
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-}
-
-.cover {
-  width: 100%;
-  aspect-ratio: 9/12;
+.drop-thumb {
+  width: 160px;
+  aspect-ratio: 16 / 9;
   object-fit: cover;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-sm);
 }
 
-.video {
-  width: 100%;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.35);
+.link-btn {
+  justify-self: start;
+  font-size: var(--text-meta);
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.progress-wrap {
+.link-btn:hover {
+  color: var(--text);
+}
+
+.preview {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-2);
+}
+
+.preview-video {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: #000000;
+}
+
+.progress {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-small);
+  color: var(--text);
 }
 
 .progress-bar {
-  height: 8px;
+  height: 6px;
+  border-radius: var(--radius-full);
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: #4a9eff;
-  border-radius: 4px;
-  transition: width 0.2s ease;
+  width: 100%;
+  background: var(--brand);
+  transform-origin: left center;
+  transition: transform var(--dur-quick) var(--ease-out);
 }
 
-.progress-text {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+.progress-sub {
+  font-size: var(--text-caption);
+  color: var(--text-3);
+}
+
+.submit {
+  padding-top: var(--sp-2);
 }
 </style>

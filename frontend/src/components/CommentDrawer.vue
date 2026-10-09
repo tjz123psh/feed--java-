@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
+import Icon from './Icon.vue'
+import UserAvatar from './UserAvatar.vue'
 import { ApiError } from '../api/client'
 import * as commentApi from '../api/comment'
-import type { Comment, FeedVideoItem } from '../api/types'
+import type { Comment } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
-const props = defineProps<{ video: FeedVideoItem | null }>()
+const props = defineProps<{ video: { id: number; title?: string } | null }>()
 const emit = defineEmits<{ close: [] }>()
 
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToastStore()
 
@@ -20,9 +24,8 @@ const drawer = reactive({
   content: '',
 })
 
-function needLogin() {
-  toast.error('请先登录')
-}
+const textareaEl = ref<HTMLTextAreaElement | null>(null)
+const panelEl = ref<HTMLElement | null>(null)
 
 function close() {
   drawer.comments = []
@@ -46,7 +49,10 @@ async function loadComments() {
 
 async function publishComment() {
   if (!props.video) return
-  if (!auth.isLoggedIn) return needLogin()
+  if (!auth.isLoggedIn) {
+    toast.error('请先登录')
+    return
+  }
   const content = drawer.content.trim()
   if (!content) return
   drawer.loading = true
@@ -71,8 +77,11 @@ function canDeleteComment(c: Comment) {
 
 async function deleteComment(commentId: number) {
   if (!props.video) return
-  if (!auth.isLoggedIn) return needLogin()
-  if (!window.confirm('确认删除这条评论？')) return
+  if (!auth.isLoggedIn) {
+    toast.error('请先登录')
+    return
+  }
+  if (!window.confirm('删除这条评论？删除后无法恢复。')) return
   drawer.loading = true
   drawer.error = ''
   try {
@@ -87,67 +96,309 @@ async function deleteComment(commentId: number) {
   }
 }
 
-defineExpose({ loadComments })
+function formatTime(raw: string) {
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString('zh-CN', { hour12: false })
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') close()
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
+  await loadComments()
+  await nextTick()
+  if (auth.isLoggedIn) textareaEl.value?.focus()
+  else panelEl.value?.focus()
+})
+
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="drawer-backdrop" @click.self="close">
-    <div class="drawer">
-      <div class="drawer-head">
-        <div class="drawer-title">{{ video?.title ?? '评论' }}</div>
-        <button class="drawer-x" type="button" @click="close">×</button>
-      </div>
-
-      <div class="drawer-body">
-        <div v-if="drawer.loading" class="drawer-hint">加载中…</div>
-        <div v-else-if="drawer.error" class="drawer-hint bad">{{ drawer.error }}</div>
-        <div v-else-if="drawer.comments.length === 0" class="drawer-hint">暂无评论</div>
-
-        <div class="comment" v-for="c in drawer.comments" :key="c.id">
-          <div class="comment-top">
-            <div class="comment-user">{{ c.username }}</div>
-            <div class="comment-meta mono">#{{ c.id }} · {{ new Date(c.created_at).toLocaleString() }}</div>
-          </div>
-          <div class="comment-content">{{ c.content }}</div>
-          <div class="comment-actions">
-            <button v-if="canDeleteComment(c)" class="chip danger" type="button" :disabled="drawer.loading" @click="deleteComment(c.id)">删除</button>
-          </div>
+  <div class="backdrop" @click.self="close">
+    <section
+      ref="panelEl"
+      class="panel"
+      role="dialog"
+      aria-modal="true"
+      aria-label="评论"
+      tabindex="-1"
+    >
+      <header class="head">
+        <div class="head-text">
+          <h2 class="head-title">评论</h2>
+          <p v-if="video?.title" class="head-sub">{{ video.title }}</p>
         </div>
+        <button class="btn btn--icon btn--ghost" type="button" aria-label="关闭评论" @click="close">
+          <Icon name="close" :size="18" />
+        </button>
+      </header>
+
+      <div class="body">
+        <div v-if="drawer.loading && drawer.comments.length === 0" class="hint">加载中…</div>
+        <div v-else-if="drawer.error && drawer.comments.length === 0" class="hint bad">
+          <Icon name="alert" :size="18" />
+          <span>{{ drawer.error }}</span>
+        </div>
+        <div v-else-if="drawer.comments.length === 0" class="hint">
+          <Icon name="comment" :size="18" />
+          <span>还没有评论，来发第一条</span>
+        </div>
+
+        <article v-for="c in drawer.comments" :key="c.id" class="comment">
+          <UserAvatar :username="c.username" :size="32" />
+          <div class="comment-main">
+            <div class="comment-top">
+              <span class="comment-user">{{ c.username }}</span>
+              <span class="comment-time">{{ formatTime(c.created_at) }}</span>
+            </div>
+            <p class="comment-content">{{ c.content }}</p>
+          </div>
+          <button
+            v-if="canDeleteComment(c)"
+            class="comment-del"
+            type="button"
+            :disabled="drawer.loading"
+            aria-label="删除这条评论"
+            @click="deleteComment(c.id)"
+          >
+            <Icon name="close" :size="14" />
+          </button>
+        </article>
       </div>
 
-      <div class="drawer-foot">
-        <textarea v-model="drawer.content" placeholder="说点什么…" :disabled="drawer.loading" />
-        <div class="row" style="justify-content: space-between; margin-top: 8px">
-          <button class="chip" type="button" :disabled="drawer.loading" @click="loadComments">刷新</button>
-          <button class="chip primary" type="button" :disabled="drawer.loading || !drawer.content.trim()" @click="publishComment">发送</button>
+      <footer class="foot">
+        <template v-if="auth.isLoggedIn">
+          <textarea
+            ref="textareaEl"
+            v-model="drawer.content"
+            class="foot-input"
+            placeholder="说点什么…"
+            :disabled="drawer.loading"
+            @keydown.ctrl.enter="publishComment"
+          />
+          <div class="foot-row">
+            <span class="foot-tip">Ctrl+Enter 发送</span>
+            <button
+              class="btn btn--primary"
+              type="button"
+              :disabled="drawer.loading || !drawer.content.trim()"
+              @click="publishComment"
+            >
+              <Icon name="send" :size="16" />
+              发送
+            </button>
+          </div>
+        </template>
+        <div v-else class="foot-guest">
+          <span class="muted">登录后参与评论</span>
+          <RouterLink class="btn btn--primary" :to="{ path: '/account', query: { redirect: route.fullPath } }">
+            去登录
+          </RouterLink>
         </div>
-      </div>
-    </div>
+      </footer>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(10px); z-index: 120; display: grid; justify-items: end; }
-.drawer { width: min(420px, calc(100vw - 18px)); height: 100vh; background: rgba(0,0,0,0.65); border-left: 1px solid rgba(255,255,255,0.12); display: grid; grid-template-rows: auto 1fr auto; }
-.drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.drawer-title { font-weight: 800; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.drawer-x { width: 34px; height: 34px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.9); cursor: pointer; font-size: 20px; line-height: 1; }
-.drawer-body { overflow: auto; padding: 12px 14px; display: grid; gap: 10px; }
-.drawer-foot { border-top: 1px solid rgba(255,255,255,0.1); padding: 12px 14px; }
-.drawer-foot textarea { width: 100%; min-height: 82px; resize: none; border-radius: 14px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.9); padding: 10px 12px; outline: none; }
-.drawer-hint { color: rgba(255,255,255,0.78); padding: 12px 0; }
-.drawer-hint.bad { color: rgba(254,44,85,0.92); }
-.comment { border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); border-radius: 14px; padding: 10px 10px; }
-.comment-top { display: grid; gap: 3px; }
-.comment-user { font-weight: 700; font-size: 13px; }
-.comment-meta { font-size: 12px; color: rgba(255,255,255,0.55); }
-.comment-content { margin-top: 8px; font-size: 13px; line-height: 1.35; color: rgba(255,255,255,0.86); white-space: pre-wrap; word-break: break-word; }
-.comment-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
-.chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.28); color: rgba(255,255,255,0.86); font-size: 12px; text-decoration: none; cursor: pointer; }
-.chip.primary { border-color: rgba(254,44,85,0.45); background: rgba(254,44,85,0.14); }
-.chip.danger { border-color: rgba(254,44,85,0.55); background: rgba(254,44,85,0.12); }
-@media (max-width: 900px) {
-  .drawer-backdrop { justify-items: center; align-items: end; }
-  .drawer { width: calc(100vw - 16px); height: min(72vh, 560px); border-left: none; border-top: 1px solid rgba(255,255,255,0.12); border-radius: 18px 18px 0 0; overflow: hidden; }
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: var(--scrim-1);
+  backdrop-filter: blur(8px);
+  display: grid;
+  justify-items: end;
+  animation: fade-in var(--dur-quick) var(--ease-out);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.panel {
+  width: min(420px, calc(100vw - 16px));
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--surface);
+  border-left: 1px solid var(--line-strong);
+  outline: none;
+  animation: slide-in var(--dur-panel) var(--ease-out);
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.head-text {
+  min-width: 0;
+}
+
+.head-title {
+  font-size: var(--text-title);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.head-sub {
+  margin-top: 2px;
+  font-size: var(--text-meta);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-10) 0;
+  color: var(--text-2);
+  font-size: var(--text-small);
+}
+
+.hint.bad {
+  color: var(--danger);
+}
+
+.comment {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.comment-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.comment-user {
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.comment-time {
+  font-size: var(--text-caption);
+  color: var(--text-3);
+}
+
+.comment-content {
+  margin-top: 4px;
+  font-size: var(--text-small);
+  line-height: var(--leading-normal);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.comment-del {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  transition: color var(--dur-quick) var(--ease-out);
+}
+
+.comment-del:hover {
+  color: var(--danger);
+}
+
+.foot {
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.foot-input {
+  min-height: 64px;
+  resize: none;
+}
+
+.foot-row {
+  margin-top: var(--sp-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.foot-tip {
+  font-size: var(--text-caption);
+  color: var(--text-3);
+}
+
+.foot-guest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--text-small);
+}
+
+@media (max-width: 767px) {
+  .backdrop {
+    justify-items: center;
+    align-items: end;
+  }
+
+  .panel {
+    width: 100%;
+    height: min(78vh, 640px);
+    border-left: none;
+    border-top: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: slide-up var(--dur-panel) var(--ease-out);
+  }
+
+  @keyframes slide-up {
+    from {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
 }
 </style>

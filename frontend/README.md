@@ -1,6 +1,9 @@
-# feedsystem_video_go frontend
+# feed-java 前端（ShortVideo）
 
-Vue 3 + Vite 前端，面向 `backend/` 的短视频 Feed 应用。默认通过 Vite 代理把 `/api/...` 转发到 `http://localhost:8080/...`。
+Vue 3 + TypeScript + Vite 前端，对接 feed-java 后端。开发时经 Vite 代理把 `/api/...`
+转发到后端（默认 `http://127.0.0.1:8081`）。
+
+> 2026-10-08 已整体重构为「影院舞台」风格：设计规范见仓库根 `DESIGN.md`，样式 token 在 `src/style.css`。
 
 ## 页面
 
@@ -20,40 +23,30 @@ Vue 3 + Vite 前端，面向 `backend/` 的短视频 Feed 应用。默认通过 
 
 ## 前端能力
 
-- Pinia 保存 access token 与 refresh token。
-- API Client 在 401 时自动调用 `/account/refresh` 并重试原请求。
+- Pinia 保存 access token 与 refresh token；API Client 在 401 时自动调用 `/account/refresh` 并重试原请求。
 - 发布页使用 `spark-md5` 计算文件 MD5 与分片 MD5。
-- 播放页使用虚拟渲染窗口，只保留当前视频前后各一条 DOM，降低长列表播放成本。
+- 首页为沉浸式短视频流：全部 slide 参与布局，`<video>` 仅挂载当前片与前后各一条，长列表播放成本低。
 - 点赞、关注、评论、分享等交互通过 toast 提示结果。
-- Vite 代理地址可通过 `VITE_API_BASE` 覆盖。
 
 ## 开发启动
 
-先启动后端 API：
-
-```bash
-cd backend
-CONFIG_PATH=configs/config.compose-local.yaml go run ./cmd
-```
-
-启动前端：
+前置：后端 API 已启动（仓库根目录 `./mvnw spring-boot:run`，监听 :8081）。
 
 ```bash
 cd frontend
-npm install
-npm run dev
+npm install --registry=https://registry.npmmirror.com   # 首次
+npm run dev -- --host 127.0.0.1                         # → http://127.0.0.1:5173/
 ```
 
-完整链路可在项目根目录执行：
+两个可覆盖的环境变量：
 
-```bash
-./start.sh
-```
+| 变量 | 作用 | 默认 |
+|------|------|------|
+| `VITE_API_TARGET` | Vite 代理目标（后端地址） | `http://127.0.0.1:8081` |
+| `VITE_API_BASE` | 请求前缀；设为完整后端地址可绕过代理直连 | `/api` |
 
 ## 构建
 
 ```bash
-npm run build
+npm run build    # vue-tsc -b && vite build，产物在 dist/
 ```
-
-Docker Compose 中前端容器使用 Nginx 托管构建产物，并把 `/api` 反向代理到后端服务。

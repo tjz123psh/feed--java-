@@ -1,31 +1,35 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive } from 'vue'
+import { onMounted, reactive } from 'vue'
 
 import { ApiError } from '../api/client'
 import * as feedApi from '../api/feed'
 import * as likeApi from '../api/like'
 import type { FeedVideoItem } from '../api/types'
 import AppShell from '../components/AppShell.vue'
-import FeedVideoCard from '../components/FeedVideoCard.vue'
+import Icon from '../components/Icon.vue'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const toast = useToastStore()
 
-const canLike = computed(() => auth.isLoggedIn)
+const LIMIT = 10
 
 const state = reactive({
   loading: false,
   error: '',
   items: [] as FeedVideoItem[],
   hasMore: false,
-  limit: 10,
   asOf: 0,
   nextOffset: 0,
 })
 
 const likeBusy = reactive<Record<string, boolean>>({})
+
+function coverFallback(id: number) {
+  const h = (id * 47) % 360
+  return `linear-gradient(160deg, hsl(${h} 26% 14%), hsl(${(h + 40) % 360} 30% 8%))`
+}
 
 async function loadHot(reset: boolean) {
   if (state.loading) return
@@ -33,7 +37,7 @@ async function loadHot(reset: boolean) {
   state.error = ''
   try {
     const res = await feedApi.listByPopularity({
-      limit: state.limit,
+      limit: LIMIT,
       as_of: reset ? 0 : state.asOf,
       offset: reset ? 0 : state.nextOffset,
     })
@@ -76,34 +80,87 @@ onMounted(async () => {
 
 <template>
   <AppShell>
-    <div class="card">
-      <div class="row" style="justify-content: space-between; align-items: baseline">
-        <div>
-          <p class="title" style="margin: 0">热榜</p>
-          <p class="subtle" style="margin: 6px 0 0">按热度排序（/feed/listByPopularity）</p>
+    <div class="page">
+      <div class="page-inner" style="--page-max: 760px">
+        <header class="head">
+          <div>
+            <h1 class="page-title">热榜</h1>
+            <p class="page-sub">按热度排序，每分钟更新</p>
+          </div>
+          <button
+            class="btn btn--icon"
+            type="button"
+            aria-label="刷新"
+            :disabled="state.loading"
+            @click="loadHot(true)"
+          >
+            <Icon name="refresh" :size="18" />
+          </button>
+        </header>
+
+        <div v-if="state.error && state.items.length === 0" class="hint-box">
+          <Icon name="alert" :size="20" />
+          <p>{{ state.error }}</p>
+          <button class="btn" type="button" @click="loadHot(true)">重试</button>
         </div>
 
-        <div class="row">
-          <label class="subtle" style="margin: 0">limit</label>
-          <input v-model.number="state.limit" type="number" min="1" max="50" style="width: 90px" :disabled="state.loading" />
-          <button class="primary" type="button" :disabled="state.loading" @click="loadHot(true)">刷新</button>
-          <button type="button" :disabled="state.loading || !state.hasMore" @click="loadHot(false)">加载更多</button>
+        <div v-else-if="state.loading && state.items.length === 0" class="skeleton-list">
+          <div v-for="i in 5" :key="i" class="skeleton-row">
+            <div class="skeleton" style="width: 28px; height: 28px" />
+            <div class="skeleton" style="width: 96px; height: 54px; border-radius: var(--radius-md)" />
+            <div class="skeleton-col">
+              <div class="skeleton" style="width: 60%; height: 16px" />
+              <div class="skeleton" style="width: 30%; height: 13px" />
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div v-if="state.error" class="pill bad" style="margin-top: 12px">错误：{{ state.error }}</div>
-      <div v-else-if="state.loading && state.items.length === 0" class="subtle" style="margin-top: 12px">加载中…</div>
-      <div v-else-if="state.items.length === 0" class="subtle" style="margin-top: 12px">暂无内容</div>
+        <div v-else-if="state.items.length === 0" class="hint-box">
+          <Icon name="fire" :size="20" />
+          <p>这一分钟还没有上榜内容</p>
+        </div>
 
-      <div v-if="state.items.length" class="rank-list" style="margin-top: 14px">
-        <div v-for="(item, idx) in state.items" :key="`hot-${item.id}`" class="rank-row">
-          <div class="rank-num" :class="idx < 3 ? 'top' : ''">{{ idx + 1 }}</div>
-          <FeedVideoCard
-            :item="item"
-            :can-like="canLike"
-            :busy="!!likeBusy[String(item.id)]"
-            @toggle-like="toggleLike"
-          />
+        <ol v-else class="rank">
+          <li v-for="(item, idx) in state.items" :key="`hot-${item.id}`" class="row">
+            <span class="rank-num" :class="{ top: idx < 3 }">{{ idx + 1 }}</span>
+            <RouterLink class="row-main" :to="`/video/${item.id}`">
+              <img
+                class="thumb"
+                :src="item.cover_url"
+                alt=""
+                loading="lazy"
+                :style="{ backgroundImage: coverFallback(item.id) }"
+              />
+              <span class="row-text">
+                <span class="row-title">{{ item.title }}</span>
+                <span class="row-sub">@{{ item.author.username }}</span>
+              </span>
+            </RouterLink>
+            <button
+              class="like"
+              :class="{ on: item.is_liked }"
+              type="button"
+              :disabled="!!likeBusy[String(item.id)]"
+              :aria-label="item.is_liked ? '取消点赞' : '点赞'"
+              @click="toggleLike(item)"
+            >
+              <Icon name="heart" :size="18" :filled="item.is_liked" />
+              <span>{{ item.likes_count }}</span>
+            </button>
+          </li>
+        </ol>
+
+        <div v-if="state.items.length" class="more">
+          <button
+            v-if="state.hasMore"
+            class="btn btn--block"
+            type="button"
+            :disabled="state.loading"
+            @click="loadHot(false)"
+          >
+            {{ state.loading ? '加载中…' : '加载更多' }}
+          </button>
+          <p v-else class="end">已经到底了</p>
         </div>
       </div>
     </div>
@@ -111,47 +168,162 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.rank-list {
-  display: grid;
-  gap: 12px;
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
 }
 
-.rank-row {
+.hint-box {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
+  justify-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-12) 0;
+  color: var(--text-2);
+  font-size: var(--text-small);
+}
+
+.rank {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .rank-num {
-  height: 44px;
-  width: 44px;
-  border-radius: 16px;
-  display: grid;
-  place-items: center;
-  font-weight: 900;
-  letter-spacing: 0.2px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.86);
-  user-select: none;
+  flex: none;
+  width: 28px;
+  text-align: center;
+  font-size: var(--text-title);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
 }
 
 .rank-num.top {
-  border-color: rgba(254, 44, 85, 0.55);
-  background: rgba(254, 44, 85, 0.18);
-  color: rgba(255, 255, 255, 0.96);
+  color: var(--brand);
 }
 
-@media (max-width: 900px) {
-  .rank-row {
-    grid-template-columns: 38px minmax(0, 1fr);
-    gap: 10px;
+.row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.thumb {
+  flex: none;
+  width: 96px;
+  height: 54px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background-size: cover;
+}
+
+.row-text {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.row-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  font-size: var(--text-meta);
+  color: var(--text-2);
+}
+
+.like {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+  transition:
+    color var(--dur-quick) var(--ease-out),
+    background var(--dur-quick) var(--ease-out);
+}
+
+.like:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.like.on {
+  color: var(--brand);
+}
+
+.like:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.more {
+  margin-top: var(--sp-6);
+}
+
+.end {
+  text-align: center;
+  font-size: var(--text-meta);
+  color: var(--text-3);
+  padding: var(--sp-3) 0;
+}
+
+.skeleton-list {
+  display: grid;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.skeleton-col {
+  flex: 1;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+@media (max-width: 767px) {
+  .row {
+    gap: var(--sp-3);
   }
+
+  .thumb {
+    width: 72px;
+    height: 41px;
+  }
+
   .rank-num {
-    height: 38px;
-    width: 38px;
-    border-radius: 14px;
+    width: 20px;
+    font-size: var(--text-lead);
+  }
+
+  .row-title {
+    font-size: var(--text-small);
   }
 }
 </style>

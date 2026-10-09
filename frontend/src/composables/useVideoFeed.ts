@@ -75,6 +75,7 @@ export function useVideoFeed() {
 
   async function loadFollowing(reset: boolean) {
     if (!auth.isLoggedIn) {
+      following.items = []
       following.error = '登录后才能查看关注流'
       return
     }

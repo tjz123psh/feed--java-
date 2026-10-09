@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
+import Icon from '../components/Icon.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import { ApiError } from '../api/client'
 import * as accountApi from '../api/account'
@@ -147,6 +148,16 @@ async function goVideo(videoId: number) {
   await router.push(`/video/${videoId}`)
 }
 
+function coverFallback(id: number) {
+  const h = (id * 47) % 360
+  return `linear-gradient(160deg, hsl(${h} 26% 14%), hsl(${(h + 40) % 360} 30% 8%))`
+}
+
+function formatDate(raw: string) {
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN')
+}
+
 watch(
   () => route.params.id,
   async () => {
@@ -167,302 +178,405 @@ onMounted(loadProfile)
 
 <template>
   <AppShell>
-    <div class="card">
-      <div class="row" style="justify-content: space-between; align-items: flex-start">
-        <div class="row" style="gap: 12px; align-items: center">
-          <UserAvatar :username="state.user?.username ?? 'User'" :id="state.user?.id ?? userId" :size="64" />
-          <div>
-            <div class="title" style="margin: 0">@{{ state.user?.username ?? '-' }}</div>
-            <div class="subtle mono">#{{ state.user?.id ?? userId }}</div>
-          </div>
-        </div>
-
-        <div class="row">
-          <button v-if="isMe" class="ghost" type="button" @click="router.push('/account')">我的账号</button>
-          <template v-else>
-            <button class="ghost" type="button" :disabled="!state.user || state.loading" @click="goMessage">私信</button>
-            <button class="primary" type="button" :disabled="!state.user || state.loading" @click="toggleFollow">
-              {{ isFollowing ? '已关注' : '关注' }}
-            </button>
-          </template>
-        </div>
-      </div>
-
-      <div v-if="state.loading" class="hint" style="margin-top: 12px">加载中…</div>
-      <div v-else-if="state.error" class="hint bad" style="margin-top: 12px">{{ state.error }}</div>
-
-      <div v-else class="row" style="margin-top: 14px">
-        <button class="metric" type="button" :disabled="!auth.isLoggedIn || state.socialLoading" @click="openFollowers">
-          <div class="metric-num">{{ auth.isLoggedIn ? (state.socialLoading ? '…' : state.followers.length) : '—' }}</div>
-          <div class="metric-label">粉丝</div>
-        </button>
-        <button class="metric" type="button" :disabled="!auth.isLoggedIn || state.socialLoading" @click="openFollowing">
-          <div class="metric-num">{{ auth.isLoggedIn ? (state.socialLoading ? '…' : state.vloggers.length) : '—' }}</div>
-          <div class="metric-label">关注</div>
-        </button>
-        <div class="metric static">
-          <div class="metric-num">{{ state.videos.length }}</div>
-          <div class="metric-label">作品</div>
-        </div>
-        <div v-if="!auth.isLoggedIn" class="subtle" style="margin-left: 8px">登录后可查看粉丝/关注列表</div>
-        <div v-else-if="state.socialError" class="subtle" style="margin-left: 8px">社交信息加载失败：{{ state.socialError }}</div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top: 14px">
-      <div class="row" style="justify-content: space-between">
-        <p class="title" style="margin: 0">作品</p>
-        <div class="subtle">点击封面进入播放页</div>
-      </div>
-
-      <div v-if="state.videos.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
-
-      <div v-else class="video-grid" style="margin-top: 12px">
-        <button v-for="v in state.videos" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
-          <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
-          <div class="video-meta">
-            <div class="video-title">{{ v.title }}</div>
-            <div class="video-sub subtle">❤️ {{ v.likes_count }} · {{ new Date(v.create_time).toLocaleDateString() }}</div>
-          </div>
-        </button>
-      </div>
-    </div>
-
-    <div v-if="drawer.open" class="drawer-backdrop" @click.self="closeDrawer">
-      <div class="drawer">
-        <div class="drawer-head">
-          <div class="drawer-title">{{ listTitle }}</div>
-          <button class="drawer-x" type="button" @click="closeDrawer">×</button>
-        </div>
-        <div class="drawer-body">
-          <div v-if="state.socialLoading" class="drawer-hint">加载中…</div>
-          <div v-else-if="state.socialError" class="drawer-hint bad">{{ state.socialError }}</div>
-          <div v-else-if="listItems.length === 0" class="drawer-hint">暂无</div>
-
-          <button v-for="u in listItems" :key="u.id" class="user-row" type="button" @click="goUser(u.id)">
-            <UserAvatar :username="u.username" :id="u.id" :size="40" />
-            <div class="user-meta">
-              <div class="user-name">@{{ u.username }}</div>
-              <div class="user-id mono">#{{ u.id }}</div>
+    <div class="page">
+      <div class="page-inner" style="--page-max: 880px">
+        <header class="profile">
+          <div class="who">
+            <UserAvatar :username="state.user?.username ?? 'User'" :id="state.user?.id ?? userId" :size="72" />
+            <div class="who-text">
+              <h1 class="who-name">@{{ state.user?.username ?? '…' }}</h1>
+              <div v-if="state.loading" class="skeleton" style="width: 120px; height: 14px" />
             </div>
-          </button>
+          </div>
+
+          <div class="who-actions">
+            <template v-if="state.user && !state.loading">
+              <template v-if="isMe">
+                <button class="btn" type="button" @click="router.push('/account')">我的账号</button>
+              </template>
+              <template v-else>
+                <button class="btn" type="button" @click="goMessage">
+                  <Icon name="mail" :size="16" />
+                  私信
+                </button>
+                <button
+                  class="btn"
+                  :class="isFollowing ? '' : 'btn--primary'"
+                  type="button"
+                  @click="toggleFollow"
+                >
+                  <Icon :name="isFollowing ? 'check' : 'userPlus'" :size="16" />
+                  {{ isFollowing ? '已关注' : '关注' }}
+                </button>
+              </template>
+            </template>
+          </div>
+        </header>
+
+        <div v-if="state.error && !state.user" class="hint">
+          <Icon name="alert" :size="20" />
+          <p>{{ state.error }}</p>
+          <button class="btn" type="button" @click="loadProfile">重试</button>
         </div>
+
+        <div v-else class="stats">
+          <button class="stat" type="button" :disabled="!auth.isLoggedIn || state.socialLoading" @click="openFollowers">
+            <span class="stat-num">{{ auth.isLoggedIn ? (state.socialLoading ? '…' : state.followers.length) : '—' }}</span>
+            <span class="stat-label">粉丝</span>
+          </button>
+          <span class="stat-sep" aria-hidden="true" />
+          <button class="stat" type="button" :disabled="!auth.isLoggedIn || state.socialLoading" @click="openFollowing">
+            <span class="stat-num">{{ auth.isLoggedIn ? (state.socialLoading ? '…' : state.vloggers.length) : '—' }}</span>
+            <span class="stat-label">关注</span>
+          </button>
+          <span class="stat-sep" aria-hidden="true" />
+          <div class="stat static">
+            <span class="stat-num">{{ state.videos.length }}</span>
+            <span class="stat-label">作品</span>
+          </div>
+          <span v-if="!auth.isLoggedIn" class="stat-hint">登录后可查看粉丝与关注</span>
+          <span v-else-if="state.socialError" class="stat-hint bad">{{ state.socialError }}</span>
+        </div>
+
+        <section class="works">
+          <h2 class="works-title">作品</h2>
+
+          <div v-if="state.loading && state.videos.length === 0" class="grid">
+            <div v-for="i in 4" :key="i" class="grid-skeleton">
+              <div class="skeleton grid-skeleton-cover" />
+              <div class="skeleton" style="width: 70%; height: 15px" />
+            </div>
+          </div>
+
+          <div v-else-if="state.videos.length === 0" class="empty">
+            <Icon name="film" :size="22" />
+            <p>{{ isMe ? '还没有发布作品，去发布第一条吧' : 'TA 还没有发布作品' }}</p>
+            <RouterLink v-if="isMe" class="btn btn--primary" to="/video">去发布</RouterLink>
+          </div>
+
+          <div v-else class="grid">
+            <button v-for="v in state.videos" :key="v.id" class="work" type="button" @click="goVideo(v.id)">
+              <img
+                class="work-cover"
+                :src="v.cover_url"
+                alt=""
+                loading="lazy"
+                :style="{ backgroundImage: coverFallback(v.id) }"
+              />
+              <span class="work-title">{{ v.title }}</span>
+              <span class="work-sub">
+                <Icon name="heart" :size="14" />
+                {{ v.likes_count }}
+                <template v-if="formatDate(v.create_time)"> · {{ formatDate(v.create_time) }}</template>
+              </span>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="drawer.open" class="backdrop" @click.self="closeDrawer">
+        <section class="panel" role="dialog" aria-modal="true" :aria-label="listTitle">
+          <header class="panel-head">
+            <h2 class="panel-title">{{ listTitle }}</h2>
+            <button class="btn btn--icon btn--ghost" type="button" aria-label="关闭" @click="closeDrawer">
+              <Icon name="close" :size="18" />
+            </button>
+          </header>
+          <div class="panel-body">
+            <div v-if="state.socialLoading" class="panel-hint">加载中…</div>
+            <div v-else-if="state.socialError" class="panel-hint bad">{{ state.socialError }}</div>
+            <div v-else-if="listItems.length === 0" class="panel-hint">还没有人</div>
+
+            <button v-for="u in listItems" :key="u.id" class="user-row" type="button" @click="goUser(u.id)">
+              <UserAvatar :username="u.username" :id="u.id" :size="38" />
+              <span class="user-name">@{{ u.username }}</span>
+              <Icon name="chevronDown" :size="16" class="user-arrow" />
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   </AppShell>
 </template>
 
 <style scoped>
-.ghost {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.055);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
+.profile {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
 }
 
-.ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
 }
 
-.metric {
-  border: 1px solid var(--border);
+.who-name {
+  font-size: var(--text-heading);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.who-actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-quick) var(--ease-out);
+}
+
+.stat:hover:not(.static) {
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 12px 14px;
-  min-width: 120px;
-  cursor: pointer;
-  display: grid;
-  gap: 4px;
-  text-align: left;
 }
 
-.metric.static {
-  cursor: default;
-}
-
-.metric:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.metric:disabled {
-  opacity: 0.55;
+.stat:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-.metric-num {
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: 0.2px;
+.stat-num {
+  font-size: var(--text-lead);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
-.metric-label {
-  font-size: 12px;
-  color: var(--muted);
+.stat-label {
+  font-size: var(--text-meta);
+  color: var(--text-2);
 }
 
-.hint {
-  color: var(--muted);
+.stat-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line-strong);
 }
 
-.hint.bad {
+.stat-hint {
+  font-size: var(--text-meta);
+  color: var(--text-3);
+  margin-left: var(--sp-2);
+}
+
+.stat-hint.bad {
   color: var(--danger);
 }
 
-.video-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-@media (max-width: 1100px) {
-  .video-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 800px) {
-  .video-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.video-card {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
-}
-
-.video-card:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.video-cover {
-  width: 100%;
-  aspect-ratio: 9/12;
-  object-fit: cover;
-  display: block;
-  background: rgba(0, 0, 0, 0.35);
-}
-
-.video-meta {
-  padding: 10px 10px;
-}
-
-.video-title {
-  font-weight: 800;
-  font-size: 13px;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.video-sub {
-  margin-top: 6px;
-  font-size: 12px;
-}
-
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
-  z-index: 120;
+.hint {
   display: grid;
   justify-items: center;
-  align-items: center;
-  padding: 16px;
+  gap: var(--sp-3);
+  padding: var(--sp-10) 0;
+  color: var(--text-2);
+  font-size: var(--text-small);
 }
 
-.drawer {
-  width: min(520px, calc(100vw - 18px));
-  max-height: min(78vh, 720px);
-  background: rgba(13, 18, 29, 0.92);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.works {
+  margin-top: var(--sp-8);
+}
+
+.works-title {
+  font-size: var(--text-title);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--sp-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+
+.grid-skeleton {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.grid-skeleton-cover {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+}
+
+.work {
+  display: grid;
+  gap: var(--sp-2);
+  text-align: left;
+  border-radius: var(--radius-md);
+  transition: transform var(--dur-quick) var(--ease-out);
+}
+
+.work:hover {
+  transform: translateY(-2px);
+}
+
+.work-cover {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.work-title {
+  font-size: var(--text-small);
+  font-weight: 600;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-caption);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-12) 0;
+  color: var(--text-2);
+  font-size: var(--text-small);
+}
+
+/* 粉丝/关注抽屉：与评论抽屉同构 */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: var(--scrim-1);
+  backdrop-filter: blur(8px);
+  display: grid;
+  justify-items: end;
+}
+
+.panel {
+  width: min(380px, calc(100vw - 16px));
+  height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
+  background: var(--surface);
+  border-left: 1px solid var(--line-strong);
+  animation: slide-in var(--dur-panel) var(--ease-out);
 }
 
-.drawer-head {
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--line);
 }
 
-.drawer-title {
-  font-weight: 900;
+.panel-title {
+  font-size: var(--text-title);
+  font-weight: 800;
 }
 
-.drawer-x {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  font-size: 20px;
-  line-height: 1;
+.panel-body {
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-4);
 }
 
-.drawer-body {
-  overflow: auto;
-  padding: 12px 14px;
+.panel-hint {
   display: grid;
-  gap: 10px;
+  place-items: center;
+  padding: var(--sp-10) 0;
+  color: var(--text-2);
+  font-size: var(--text-small);
 }
 
-.drawer-hint {
-  color: var(--muted);
-  padding: 12px 0;
-}
-
-.drawer-hint.bad {
+.panel-hint.bad {
   color: var(--danger);
 }
 
 .user-row {
-  text-align: left;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
+  display: flex;
   align-items: center;
-  padding: 10px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
-  cursor: pointer;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
 }
 
-.user-row:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.user-meta {
-  min-width: 0;
+.user-row:hover .user-name {
+  color: var(--brand);
 }
 
 .user-name {
-  font-weight: 800;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--dur-quick) var(--ease-out);
 }
 
-.user-id {
-  font-size: 12px;
-  color: var(--muted);
+.user-arrow {
+  color: var(--text-3);
+  transform: rotate(-90deg);
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+@media (max-width: 767px) {
+  .backdrop {
+    justify-items: center;
+    align-items: end;
+  }
+
+  .panel {
+    width: 100%;
+    height: min(72vh, 560px);
+    border-left: none;
+    border-top: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  @keyframes slide-in {
+    from {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
 }
 </style>
-

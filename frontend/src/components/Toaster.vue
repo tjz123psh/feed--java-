@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Icon from './Icon.vue'
 import { useToastStore } from '../stores/toast'
 
 const toast = useToastStore()
@@ -7,8 +8,12 @@ const toast = useToastStore()
 <template>
   <div class="toast-wrap" aria-live="polite" aria-relevant="additions removals">
     <div v-for="t in toast.toasts" :key="t.id" class="toast" :class="t.type">
-      <div class="toast-msg">{{ t.message }}</div>
-      <button class="toast-x" type="button" aria-label="关闭" @click="toast.remove(t.id)">×</button>
+      <span v-if="t.type === 'success'" class="toast-icon ok"><Icon name="check" :size="16" /></span>
+      <span v-else-if="t.type === 'error'" class="toast-icon bad"><Icon name="alert" :size="16" /></span>
+      <span class="toast-msg">{{ t.message }}</span>
+      <button class="toast-x" type="button" aria-label="关闭" @click="toast.remove(t.id)">
+        <Icon name="close" :size="14" />
+      </button>
     </div>
   </div>
 </template>
@@ -16,58 +21,83 @@ const toast = useToastStore()
 <style scoped>
 .toast-wrap {
   position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: grid;
-  gap: 10px;
+  left: var(--sp-6);
+  bottom: var(--sp-6);
   z-index: 200;
-  width: min(520px, calc(100vw - 24px));
+  display: grid;
+  gap: var(--sp-2);
+  width: min(380px, calc(100vw - 32px));
   pointer-events: none;
 }
 
 .toast {
   pointer-events: auto;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
+  display: flex;
   align-items: center;
-  border-radius: 14px;
+  gap: var(--sp-3);
   padding: 10px 12px;
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.55);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: toast-in var(--dur-panel) var(--ease-out);
 }
 
-.toast.success {
-  border-color: rgba(34, 197, 94, 0.35);
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.toast.error {
-  border-color: rgba(254, 44, 85, 0.45);
+.toast-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
 }
 
-.toast.info {
-  border-color: rgba(37, 244, 238, 0.3);
+.toast-icon.ok {
+  color: var(--success);
+}
+
+.toast-icon.bad {
+  color: var(--danger);
 }
 
 .toast-msg {
-  font-size: 13px;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.92);
+  flex: 1;
+  font-size: var(--text-small);
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-word;
 }
 
 .toast-x {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.88);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 0;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  transition: color var(--dur-quick) var(--ease-out);
+}
+
+.toast-x:hover {
+  color: var(--text);
+}
+
+@media (max-width: 767px) {
+  .toast-wrap {
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(56px + env(safe-area-inset-bottom) + 12px);
+    width: calc(100vw - 24px);
+    max-width: 420px;
+  }
 }
 </style>

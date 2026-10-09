@@ -3,11 +3,12 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
+import CommentDrawer from '../components/CommentDrawer.vue'
+import Icon from '../components/Icon.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import { ApiError } from '../api/client'
-import * as commentApi from '../api/comment'
 import * as likeApi from '../api/like'
-import type { Comment, Video } from '../api/types'
+import type { Video } from '../api/types'
 import * as videoApi from '../api/video'
 import { useAuthStore } from '../stores/auth'
 import { useSocialStore } from '../stores/social'
@@ -30,19 +31,13 @@ const state = reactive({
 })
 
 const muted = ref(true)
+const playing = ref(false)
 const videoEl = ref<HTMLVideoElement | null>(null)
-
-const drawer = reactive({
-  open: false,
-  loading: false,
-  error: '',
-  comments: [] as Comment[],
-  content: '',
-})
+const commentsOpen = ref(false)
 
 async function needLogin() {
   toast.error('请先登录')
-  await router.push('/account')
+  await router.push({ path: '/account', query: { redirect: route.fullPath } })
 }
 
 async function loadVideo() {
@@ -80,14 +75,13 @@ async function play() {
   try {
     await videoEl.value.play()
   } catch {
-    // ignore
+    // 自动播放被拦截时保留暂停态，等待用户手势
   }
 }
 
 function toggleMute() {
   muted.value = !muted.value
   if (videoEl.value) videoEl.value.muted = muted.value
-  toast.info(muted.value ? '已静音' : '已取消静音')
 }
 
 function togglePlayPause() {
@@ -155,81 +149,24 @@ async function share() {
   }
 }
 
-function closeDrawer() {
-  drawer.open = false
-  drawer.comments = []
-  drawer.content = ''
-  drawer.error = ''
+function coverFallback(id: number) {
+  const h = (id * 47) % 360
+  return `linear-gradient(160deg, hsl(${h} 26% 14%), hsl(${(h + 40) % 360} 30% 8%))`
 }
 
-async function loadComments() {
-  if (!state.video) return
-  drawer.loading = true
-  drawer.error = ''
-  try {
-    drawer.comments = await commentApi.listAll(state.video.id)
-  } catch (e) {
-    drawer.error = e instanceof ApiError ? e.message : String(e)
-  } finally {
-    drawer.loading = false
-  }
+function formatDate(raw: string) {
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString('zh-CN', { hour12: false })
 }
 
-async function openComments() {
-  drawer.open = true
-  drawer.content = ''
-  await loadComments()
-}
-
-async function publishComment() {
-  if (!state.video) return
-  if (!auth.isLoggedIn) return needLogin()
-  const content = drawer.content.trim()
-  if (!content) return
-
-  drawer.loading = true
-  drawer.error = ''
-  try {
-    await commentApi.publish(state.video.id, content)
-    drawer.content = ''
-    await loadComments()
-    toast.success('评论已发布')
-  } catch (e) {
-    drawer.error = e instanceof ApiError ? e.message : String(e)
-    toast.error(drawer.error)
-  } finally {
-    drawer.loading = false
-  }
-}
-
-function canDeleteComment(c: Comment) {
-  const myId = auth.claims?.account_id
-  return !!myId && myId === c.author_id
-}
-
-async function deleteComment(commentId: number) {
-  if (!state.video) return
-  if (!auth.isLoggedIn) return needLogin()
-  if (!window.confirm('确认删除这条评论？')) return
-
-  drawer.loading = true
-  drawer.error = ''
-  try {
-    await commentApi.remove(commentId)
-    await loadComments()
-    toast.info('评论已删除')
-  } catch (e) {
-    drawer.error = e instanceof ApiError ? e.message : String(e)
-    toast.error(drawer.error)
-  } finally {
-    drawer.loading = false
-  }
+function closeComments() {
+  commentsOpen.value = false
 }
 
 watch(
   () => id.value,
   async () => {
-    closeDrawer()
+    commentsOpen.value = false
     await loadVideo()
     await loadIsLiked()
     await nextTick()
@@ -253,434 +190,364 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell full>
-    <div class="page">
-      <div class="top">
-        <div class="top-left">
-          <RouterLink class="chip" to="/">← 返回推荐</RouterLink>
-        </div>
-        <div class="top-right">
-          <button class="chip" type="button" @click="toggleMute">{{ muted ? '静音' : '有声' }}</button>
-        </div>
-      </div>
-
-      <div class="wrap">
-        <div v-if="state.loading" class="center-hint">加载中…</div>
-        <div v-else-if="state.error" class="center-hint bad">{{ state.error }}</div>
-
-        <div v-else-if="state.video" class="stage" @click="togglePlayPause">
-          <video
-            ref="videoEl"
-            class="video"
-            :src="state.video.play_url"
-            :poster="state.video.cover_url"
-            playsinline
-            preload="metadata"
-            loop
-          />
-          <div class="grad" />
-
-          <div class="meta">
-            <RouterLink class="author-link" :to="`/u/${state.video.author_id}`" @click.stop>
-              <UserAvatar :username="state.video.username" :id="state.video.author_id" :size="34" />
-              <span class="author-name">@{{ state.video.username }}</span>
-            </RouterLink>
-            <div class="title">{{ state.video.title }}</div>
-            <div v-if="state.video.description" class="desc">{{ state.video.description }}</div>
-            <div class="row" style="margin-top: 10px">
-              <a class="chip mono" :href="state.video.play_url" target="_blank" rel="noreferrer">play_url</a>
-              <a class="chip mono" :href="state.video.cover_url" target="_blank" rel="noreferrer">cover_url</a>
-            </div>
-          </div>
-
-          <div class="actions">
-            <button class="act" type="button" :disabled="state.busy" @click.stop="toggleLike">
-              <span class="icon" :class="{ liked: !!state.isLiked }">♥</span>
-              <span class="count">{{ state.video.likes_count }}</span>
-            </button>
-
-            <button class="act" type="button" @click.stop="openComments">
-              <span class="icon">💬</span>
-              <span class="count">评论</span>
-            </button>
-
-            <button
-              v-if="!auth.claims?.account_id || auth.claims.account_id !== state.video.author_id"
-              class="act"
-              type="button"
-              :disabled="state.busy"
-              @click.stop="toggleFollow"
-            >
-              <span class="icon">＋</span>
-              <span class="count">{{ social.isFollowing(state.video.author_id) ? '已关注' : '关注' }}</span>
-            </button>
-
-            <button class="act" type="button" @click.stop="share">
-              <span class="icon">↗</span>
-              <span class="count">分享</span>
-            </button>
-          </div>
-
-          <div class="hint">
-            <span class="chip mono">点击 暂停/播放</span>
-            <span class="chip mono">双击 点赞</span>
-          </div>
+  <AppShell>
+    <div class="detail">
+      <div class="topbar">
+        <button class="pill" type="button" aria-label="返回上一页" @click="router.back()">
+          <Icon name="back" :size="16" />
+          返回
+        </button>
+        <div class="topbar-right">
+          <button
+            class="pill"
+            type="button"
+            :aria-label="muted ? '取消静音' : '静音'"
+            @click="toggleMute"
+          >
+            <Icon :name="muted ? 'mute' : 'volume'" :size="16" />
+          </button>
         </div>
       </div>
 
-      <div v-if="drawer.open" class="drawer-backdrop" @click.self="closeDrawer">
-        <div class="drawer">
-          <div class="drawer-head">
-            <div class="drawer-title">评论</div>
-            <button class="drawer-x" type="button" @click="closeDrawer">×</button>
-          </div>
+      <div v-if="state.loading && !state.video" class="center">
+        <div class="skeleton media-skeleton" />
+      </div>
 
-          <div class="drawer-body">
-            <div v-if="drawer.loading" class="drawer-hint">加载中…</div>
-            <div v-else-if="drawer.error" class="drawer-hint bad">{{ drawer.error }}</div>
-            <div v-else-if="drawer.comments.length === 0" class="drawer-hint">暂无评论</div>
-
-            <div class="comment" v-for="c in drawer.comments" :key="c.id">
-              <div class="comment-top">
-                <div class="comment-user">{{ c.username }}</div>
-                <div class="comment-meta mono">
-                  #{{ c.id }} · {{ new Date(c.created_at).toLocaleString() }}
-                </div>
-              </div>
-              <div class="comment-content">{{ c.content }}</div>
-              <div class="comment-actions">
-                <button v-if="canDeleteComment(c)" class="chip danger" type="button" :disabled="drawer.loading" @click="deleteComment(c.id)">
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="drawer-foot">
-            <textarea v-model="drawer.content" placeholder="说点什么…" :disabled="drawer.loading" />
-            <div class="row" style="justify-content: space-between; margin-top: 8px">
-              <button class="chip" type="button" :disabled="drawer.loading" @click="loadComments">刷新</button>
-              <button class="chip primary" type="button" :disabled="drawer.loading || !drawer.content.trim()" @click="publishComment">
-                发送
-              </button>
-            </div>
-          </div>
+      <div v-else-if="state.error && !state.video" class="center">
+        <div class="center-box">
+          <Icon name="alert" :size="26" />
+          <p>{{ state.error }}</p>
+          <button class="btn" type="button" @click="loadVideo">重试</button>
         </div>
       </div>
+
+      <div v-else-if="state.video" class="stage" @click="togglePlayPause" @dblclick.prevent="toggleLike">
+        <div
+          class="ambient"
+          :style="{ backgroundImage: `url(${state.video.cover_url}), ${coverFallback(state.video.id)}` }"
+          aria-hidden="true"
+        />
+
+        <video
+          ref="videoEl"
+          class="media"
+          :src="state.video.play_url"
+          :poster="state.video.cover_url"
+          playsinline
+          preload="metadata"
+          loop
+          @play="playing = true"
+          @pause="playing = false"
+        />
+
+        <div v-if="!playing" class="paused-badge">
+          <Icon name="play" :size="26" filled />
+        </div>
+
+        <div class="scrim" />
+
+        <div class="meta">
+          <RouterLink class="author" :to="`/u/${state.video.author_id}`" @click.stop>
+            <UserAvatar :username="state.video.username" :id="state.video.author_id" :size="36" />
+            <span class="author-name">@{{ state.video.username }}</span>
+          </RouterLink>
+          <h1 class="title">{{ state.video.title }}</h1>
+          <p v-if="state.video.description" class="desc">{{ state.video.description }}</p>
+          <p class="time">发布于 {{ formatDate(state.video.create_time) }}</p>
+        </div>
+
+        <div class="actions">
+          <button
+            class="action"
+            :class="{ liked: !!state.isLiked }"
+            type="button"
+            :disabled="state.busy"
+            :aria-label="state.isLiked ? '取消点赞' : '点赞'"
+            @click.stop="toggleLike"
+          >
+            <Icon name="heart" :size="22" :filled="!!state.isLiked" />
+            <span>{{ state.video.likes_count }}</span>
+          </button>
+          <button class="action" type="button" aria-label="评论" @click.stop="commentsOpen = true">
+            <Icon name="comment" :size="22" />
+            <span>评论</span>
+          </button>
+          <button
+            v-if="!auth.claims?.account_id || auth.claims.account_id !== state.video.author_id"
+            class="action"
+            :class="{ following: social.isFollowing(state.video.author_id) }"
+            type="button"
+            :disabled="state.busy"
+            :aria-label="social.isFollowing(state.video.author_id) ? '取消关注' : '关注'"
+            @click.stop="toggleFollow"
+          >
+            <Icon :name="social.isFollowing(state.video.author_id) ? 'check' : 'userPlus'" :size="22" />
+            <span>{{ social.isFollowing(state.video.author_id) ? '已关注' : '关注' }}</span>
+          </button>
+          <button class="action" type="button" aria-label="分享" @click.stop="share">
+            <Icon name="share" :size="22" />
+            <span>分享</span>
+          </button>
+        </div>
+      </div>
+
+      <CommentDrawer v-if="commentsOpen" :video="state.video" @close="closeComments" />
     </div>
   </AppShell>
 </template>
 
 <style scoped>
-.page {
+.detail {
+  position: relative;
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
 }
 
-.top {
-  height: 52px;
+.topbar {
+  position: absolute;
+  top: var(--sp-4);
+  left: var(--sp-5);
+  right: var(--sp-5);
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(16px);
+  pointer-events: none;
 }
 
-.wrap {
-  flex: 1;
-  min-height: 0;
+.pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  color: var(--text-2);
+  font-size: var(--text-small);
+  font-weight: 600;
+  transition: color var(--dur-quick) var(--ease-out);
+}
+
+.pill:hover {
+  color: var(--text);
+}
+
+.topbar-right {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.center {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  padding: 18px 14px;
 }
 
-.center-hint {
-  color: rgba(255, 255, 255, 0.78);
+.media-skeleton {
+  width: min(72%, 760px);
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
 }
 
-.center-hint.bad {
-  color: rgba(254, 44, 85, 0.92);
+.center-box {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-3);
+  color: var(--text-2);
+  font-size: var(--text-small);
 }
 
+/* 舞台：与 HomeView 保持一致（env 辉光 + contain 视频 + 底部渐层） */
 .stage {
-  width: min(980px, calc(100vw - 28px));
-  height: calc(100vh - 56px - 52px - 36px);
-  position: relative;
-  border-radius: 18px;
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
 }
 
-.video {
+.ambient {
+  position: absolute;
+  inset: -12%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(64px) saturate(1.45) brightness(0.5);
+  opacity: 0.55;
+  animation: ambient-breathe 9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes ambient-breathe {
+  0%,
+  100% {
+    transform: scale(1.02);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+.media {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  background: rgba(0, 0, 0, 0.4);
+  object-fit: contain;
 }
 
-.grad {
+.paused-badge {
   position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.68), rgba(0, 0, 0, 0.12) 40%, rgba(0, 0, 0, 0) 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--line-strong);
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+}
+
+.scrim {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.74), transparent);
   pointer-events: none;
 }
 
 .meta {
   position: absolute;
-  left: 16px;
-  bottom: 18px;
-  max-width: min(620px, calc(100% - 96px));
+  left: clamp(16px, 4vw, 48px);
+  bottom: clamp(28px, 7vh, 56px);
+  max-width: min(58ch, 56%);
+  display: grid;
+  gap: var(--sp-2);
 }
 
-.author-link {
+.author {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-weight: 800;
-  letter-spacing: 0.2px;
-  margin-bottom: 6px;
-  text-decoration: none;
-}
-
-.author-link:hover {
-  text-decoration: none;
+  gap: var(--sp-2);
+  width: fit-content;
 }
 
 .author-name {
-  text-shadow: 0 14px 30px rgba(0, 0, 0, 0.55);
+  font-size: var(--text-small);
+  font-weight: 700;
 }
 
 .title {
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 6px;
+  font-size: var(--text-heading);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
 }
 
 .desc {
-  color: rgba(255, 255, 255, 0.74);
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: var(--text-small);
+  line-height: var(--leading-normal);
+  color: rgba(255, 255, 255, 0.78);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.time {
+  font-size: var(--text-caption);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .actions {
   position: absolute;
-  right: 12px;
-  bottom: 18px;
+  right: clamp(12px, 3vw, 40px);
+  bottom: clamp(28px, 7vh, 56px);
   display: grid;
-  gap: 12px;
+  gap: var(--sp-2);
 }
 
-.act {
-  width: 70px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.32);
-  color: rgba(255, 255, 255, 0.92);
-  padding: 10px 10px;
-  cursor: pointer;
+.action {
   display: grid;
-  gap: 6px;
   justify-items: center;
+  gap: 4px;
+  width: 56px;
+  padding: 8px 0;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--text-micro);
+  line-height: 1.2;
+  transition: background var(--dur-quick) var(--ease-out);
 }
 
-.act:hover {
+.action:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.act:disabled {
+.action:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.icon {
-  font-size: 20px;
-  line-height: 1;
-  opacity: 0.92;
+.action.liked {
+  color: var(--brand);
 }
 
-.icon.liked {
-  color: rgba(254, 44, 85, 1);
-  text-shadow: 0 10px 20px rgba(254, 44, 85, 0.25);
+.action.liked :deep(.icon) {
+  animation: like-pop var(--dur-quick) var(--ease-out);
 }
 
-.count {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.hint {
-  position: absolute;
-  left: 14px;
-  top: 14px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.28);
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.chip.primary {
-  border-color: rgba(254, 44, 85, 0.45);
-  background: rgba(254, 44, 85, 0.14);
-}
-
-.chip.danger {
-  border-color: rgba(254, 44, 85, 0.55);
-  background: rgba(254, 44, 85, 0.12);
-}
-
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
-  z-index: 120;
-  display: grid;
-  justify-items: end;
-}
-
-.drawer {
-  width: min(420px, calc(100vw - 18px));
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.65);
-  border-left: 1px solid rgba(255, 255, 255, 0.12);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-}
-
-.drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.drawer-title {
-  font-weight: 800;
-  font-size: 14px;
-}
-
-.drawer-x {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  font-size: 20px;
-  line-height: 1;
-}
-
-.drawer-body {
-  overflow: auto;
-  padding: 12px 14px;
-  display: grid;
-  gap: 10px;
-}
-
-.drawer-foot {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 12px 14px;
-}
-
-.drawer-foot textarea {
-  width: 100%;
-  min-height: 82px;
-  resize: none;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
-  padding: 10px 12px;
-  outline: none;
-}
-
-.drawer-hint {
-  color: rgba(255, 255, 255, 0.78);
-  padding: 12px 0;
-}
-
-.drawer-hint.bad {
-  color: rgba(254, 44, 85, 0.92);
-}
-
-.comment {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 14px;
-  padding: 10px 10px;
-}
-
-.comment-top {
-  display: grid;
-  gap: 3px;
-}
-
-.comment-user {
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.comment-meta {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.comment-content {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.86);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.comment-actions {
-  margin-top: 10px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-}
-
-@media (max-width: 900px) {
-  .stage {
-    width: calc(100vw - 28px);
-    height: calc(100vh - 56px - 52px - 36px);
+@keyframes like-pop {
+  0% {
+    transform: scale(1);
   }
-  .drawer-backdrop {
-    justify-items: center;
-    align-items: end;
+  45% {
+    transform: scale(1.28);
   }
-  .drawer {
-    width: calc(100vw - 16px);
-    height: min(72vh, 560px);
-    border-left: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 18px 18px 0 0;
-    overflow: hidden;
+  100% {
+    transform: scale(1);
+  }
+}
+
+.action.following {
+  color: var(--text-2);
+}
+
+@media (max-width: 767px) {
+  .topbar {
+    top: var(--sp-3);
+    left: var(--sp-3);
+    right: var(--sp-3);
+  }
+
+  .meta {
+    left: var(--sp-4);
+    right: 84px;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    max-width: none;
+  }
+
+  .title {
+    font-size: var(--text-title);
+  }
+
+  .actions {
+    right: var(--sp-3);
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    gap: 0;
+  }
+
+  .action {
+    width: 48px;
+    padding: 6px 0;
   }
 }
 </style>

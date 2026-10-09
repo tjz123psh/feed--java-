@@ -1,25 +1,18 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 
+import Icon from './Icon.vue'
+import Toaster from './Toaster.vue'
+import UserAvatar from './UserAvatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useSocialStore } from '../stores/social'
-import Toaster from './Toaster.vue'
-
-const props = defineProps<{ full?: boolean }>()
 
 const auth = useAuthStore()
 const social = useSocialStore()
-const router = useRouter()
-const route = useRoute()
 
-const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
-watch(
-  () => route.query.q,
-  (v) => {
-    search.value = typeof v === 'string' ? v : ''
-  },
-)
+const accountId = computed(() => auth.claims?.account_id ?? 0)
+const username = computed(() => auth.claims?.username ?? '')
 
 watch(
   () => auth.isLoggedIn,
@@ -30,334 +23,236 @@ watch(
   { immediate: true },
 )
 
-const userLabel = computed(() => {
-  if (!auth.isLoggedIn) return '未登录'
-  const username = auth.claims?.username ?? '(unknown)'
-  const accountId = auth.claims?.account_id
-  return accountId ? `${username} #${accountId}` : username
-})
-
-async function onSearch() {
-  const q = search.value.trim()
-  await router.push({ path: '/', query: q ? { q } : {} })
-}
-
-async function goLogin() {
-  await router.push('/account')
-}
-
-async function goSettings() {
-  await router.push('/settings')
-}
+const navItems = computed(() => [
+  { to: '/', icon: 'home', label: '推荐' },
+  { to: '/hot', icon: 'fire', label: '热榜' },
+  { to: '/video', icon: 'plus', label: '发布' },
+  { to: '/messages', icon: 'mail', label: '私信' },
+  { to: auth.isLoggedIn ? `/u/${accountId.value}` : '/account', icon: 'user', label: '我的' },
+])
 </script>
 
 <template>
-  <div class="dy-shell">
-    <aside class="dy-aside">
-      <RouterLink class="dy-logo" to="/">ShortVideo</RouterLink>
+  <div class="shell">
+    <aside class="rail" aria-label="主导航">
+      <RouterLink class="brand" to="/" aria-label="ShortVideo 首页">
+        <span class="brand-mark"><Icon name="play" :size="15" filled /></span>
+      </RouterLink>
 
-      <nav class="dy-nav">
-        <RouterLink class="dy-nav-link" to="/">推荐</RouterLink>
-        <RouterLink class="dy-nav-link" to="/hot">热榜</RouterLink>
-        <RouterLink class="dy-nav-link" to="/video">发布</RouterLink>
-        <RouterLink class="dy-nav-link" to="/account">账号</RouterLink>
-        <RouterLink v-if="auth.isLoggedIn" class="dy-nav-link" to="/messages">私信</RouterLink>
-        <RouterLink class="dy-nav-link" to="/settings">设置</RouterLink>
+      <nav class="rail-nav">
+        <RouterLink v-for="item in navItems" :key="item.label" class="rail-link" :to="item.to">
+          <Icon :name="item.icon" :size="22" />
+          <span class="rail-label">{{ item.label }}</span>
+        </RouterLink>
       </nav>
 
-      <div class="dy-aside-foot">
-        <div class="dy-user">
-          <span class="dy-user-dot" :class="auth.isLoggedIn ? 'ok' : 'bad'" />
-          <span class="dy-user-name">{{ userLabel }}</span>
-        </div>
-        <div class="dy-user-actions">
-          <button v-if="!auth.isLoggedIn" class="dy-btn dy-btn-primary" type="button" @click="goLogin">登录</button>
-          <button v-else class="dy-btn dy-btn-primary" type="button" @click="goSettings">设置</button>
-        </div>
+      <div class="rail-foot">
+        <RouterLink class="rail-link rail-link--mini" to="/settings" aria-label="设置">
+          <Icon name="sliders" :size="20" />
+        </RouterLink>
+        <RouterLink
+          v-if="auth.isLoggedIn"
+          class="rail-user"
+          :to="`/u/${accountId}`"
+          :aria-label="`我的主页 ${username}`"
+        >
+          <UserAvatar :username="username" :id="accountId" :size="30" />
+        </RouterLink>
+        <RouterLink v-else class="rail-login" to="/account">登录</RouterLink>
       </div>
     </aside>
 
-    <div class="dy-main">
-      <header class="dy-topbar">
-        <div class="dy-top-left">
-          <div class="dy-tabs-hint">{{ route.name }}</div>
-        </div>
+    <main class="main">
+      <slot />
+    </main>
 
-        <div class="dy-search">
-          <input v-model="search" class="dy-search-input" placeholder="搜索标题 / 作者（本地过滤）" @keydown.enter="onSearch" />
-          <button class="dy-btn dy-btn-primary" type="button" @click="onSearch">搜索</button>
-        </div>
-
-        <div class="dy-top-right">
-          <RouterLink class="dy-btn dy-btn-ghost" to="/video">+ 发布视频</RouterLink>
-        </div>
-      </header>
-
-      <nav class="dy-mobile-nav">
-        <RouterLink class="dy-mobile-link" to="/">推荐</RouterLink>
-        <RouterLink class="dy-mobile-link" to="/hot">热榜</RouterLink>
-        <RouterLink class="dy-mobile-link" to="/video">发布</RouterLink>
-        <RouterLink v-if="auth.isLoggedIn" class="dy-mobile-link" to="/messages">私信</RouterLink>
-        <RouterLink class="dy-mobile-link" to="/account">账号</RouterLink>
-      </nav>
-
-      <div class="dy-content" :class="props.full ? 'full' : 'padded'">
-        <template v-if="props.full">
-          <slot />
-        </template>
-        <template v-else>
-          <div class="container">
-            <slot />
-          </div>
-        </template>
-      </div>
-    </div>
+    <nav class="tabbar" aria-label="主导航">
+      <RouterLink v-for="item in navItems" :key="item.label" class="tab-link" :to="item.to">
+        <Icon :name="item.icon" :size="22" />
+        <span>{{ item.label }}</span>
+      </RouterLink>
+    </nav>
 
     <Toaster />
   </div>
 </template>
 
 <style scoped>
-.dy-shell {
-  height: 100vh;
-  display: grid;
-  grid-template-columns: 232px 1fr;
-  background: transparent;
+.shell {
+  height: 100%;
+  display: flex;
 }
 
-.dy-aside {
-  border-right: 1px solid var(--border);
-  background: rgba(12, 16, 23, 0.78);
-  backdrop-filter: blur(18px);
-  padding: 14px 12px;
+/* —— 桌面左轨 —— */
+.rail {
+  width: 76px;
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-4) 0 var(--sp-4);
+  border-right: 1px solid var(--line);
+  background: rgba(11, 14, 19, 0.72);
+  backdrop-filter: blur(20px);
+  z-index: 20;
 }
 
-.dy-logo {
-  font-weight: 900;
-  letter-spacing: 0;
-  font-size: 18px;
-  padding: 10px 10px;
-  border-radius: 8px;
-  background: rgba(43, 161, 255, 0.1);
-  border: 1px solid rgba(43, 161, 255, 0.22);
-  text-decoration: none;
-}
-
-.dy-nav {
+.brand {
   display: grid;
-  gap: 8px;
+  place-items: center;
+  width: 44px;
+  height: 44px;
 }
 
-.dy-nav-link {
-  padding: 10px 10px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(246, 248, 251, 0.86);
-  text-decoration: none;
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 18px rgba(255, 59, 107, 0.35);
 }
 
-.dy-nav-link.router-link-active {
-  border-color: rgba(43, 161, 255, 0.42);
-  background: rgba(43, 161, 255, 0.14);
-  color: rgba(246, 248, 251, 0.96);
+.rail-nav {
+  display: grid;
+  gap: var(--sp-1);
+  width: 100%;
+  padding: 0 var(--sp-2);
 }
 
-.dy-aside-foot {
+.rail-link {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: var(--sp-2) 0;
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+  font-size: var(--text-micro);
+  line-height: 1.2;
+  transition:
+    color var(--dur-quick) var(--ease-out),
+    background var(--dur-quick) var(--ease-out);
+}
+
+.rail-link:hover {
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.rail-link.router-link-active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.rail-link.router-link-active :deep(.icon) {
+  color: var(--brand);
+}
+
+.rail-link--mini {
+  width: 44px;
+  margin: 0 auto var(--sp-2);
+  padding: var(--sp-3) 0;
+}
+
+.rail-foot {
   margin-top: auto;
   display: grid;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  justify-items: center;
+  gap: var(--sp-3);
 }
 
-.dy-user {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+.rail-user {
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  transition: transform var(--dur-quick) var(--ease-out);
 }
 
-.dy-user-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+.rail-user:hover {
+  transform: scale(1.06);
 }
 
-.dy-user-dot.ok {
-  background: rgba(34, 197, 94, 1);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.14);
+.rail-login {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  transition:
+    color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out);
 }
 
-.dy-user-dot.bad {
-  background: rgba(255, 93, 115, 1);
-  box-shadow: 0 0 0 3px rgba(255, 93, 115, 0.14);
-}
-
-.dy-user-name {
-  font-size: 13px;
+.rail-login:hover {
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-color: var(--brand);
 }
 
-.dy-user-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.dy-btn {
-  appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: center;
-  font-size: 13px;
-}
-
-.dy-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.dy-btn-primary {
-  border-color: rgba(43, 161, 255, 0.5);
-  background: rgba(43, 161, 255, 0.16);
-}
-
-.dy-btn-primary:hover {
-  background: rgba(43, 161, 255, 0.24);
-}
-
-.dy-btn-ghost {
-  border-color: var(--border);
-  background: rgba(255, 255, 255, 0.045);
-}
-
-.dy-main {
-  height: 100vh;
+/* —— 主区 —— */
+.main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-width: 0;
 }
 
-.dy-topbar {
-  height: 56px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(12, 16, 23, 0.68);
-  backdrop-filter: blur(18px);
-  display: grid;
-  grid-template-columns: 180px 1fr 180px;
-  gap: 12px;
-  align-items: center;
-  padding: 0 14px;
-}
-
-.dy-tabs-hint {
-  font-size: 12px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.dy-search {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: center;
-  max-width: 680px;
-  width: 100%;
-  justify-self: center;
-}
-
-.dy-search-input {
-  width: 100%;
-  background: rgba(255, 255, 255, 0.055);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  padding: 10px 14px;
-  outline: none;
-}
-
-.dy-search-input:focus {
-  border-color: rgba(43, 161, 255, 0.52);
-  box-shadow: 0 0 0 3px rgba(43, 161, 255, 0.14);
-}
-
-.dy-top-right {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.dy-content {
-  flex: 1;
-  min-height: 0;
-}
-
-.dy-content.padded {
-  overflow: auto;
-}
-
-.dy-content.full {
-  overflow: hidden;
-}
-
-.dy-mobile-nav {
+/* —— 窄屏底部 Tab —— */
+.tabbar {
   display: none;
 }
 
-@media (max-width: 900px) {
-  .dy-shell {
-    grid-template-columns: 1fr;
-  }
-  .dy-aside {
+@media (max-width: 767px) {
+  .rail {
     display: none;
   }
-  .dy-topbar {
-    grid-template-columns: 1fr;
-    padding: 0 10px;
+
+  .shell {
+    display: block;
   }
-  .dy-top-left {
-    display: none;
+
+  .main {
+    height: 100%;
   }
-  .dy-top-right {
-    display: none;
-  }
-  .dy-mobile-nav {
-    height: 48px;
+
+  .tabbar {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 30;
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
-    border-bottom: 1px solid var(--border);
-    background: rgba(12, 16, 23, 0.74);
-    backdrop-filter: blur(18px);
+    background: rgba(11, 14, 19, 0.9);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--line);
   }
-  .dy-mobile-link {
+
+  .tab-link {
     display: grid;
-    place-items: center;
-    color: var(--muted);
-    font-size: 13px;
-    text-decoration: none;
-    border-bottom: 2px solid transparent;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    color: var(--text-3);
+    font-size: var(--text-micro);
+    line-height: 1.2;
   }
-  .dy-mobile-link.router-link-active {
+
+  .tab-link.router-link-active {
     color: var(--text);
-    border-bottom-color: var(--primary);
   }
-  .dy-search {
-    max-width: none;
+
+  .tab-link.router-link-active :deep(.icon) {
+    color: var(--brand);
   }
 }
 </style>

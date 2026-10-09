@@ -17,6 +17,15 @@ type ApiErrorBody = { error?: string }
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
+/** 统一网络层：fetch 抛出的连接错误（断网/后端未启动）转成可读的 ApiError。 */
+async function doFetch(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init)
+  } catch {
+    throw new ApiError('网络异常，请检查后端服务是否在运行', 0)
+  }
+}
+
 let isRefreshing = false
 let refreshPromise: Promise<string | null> | null = null
 
@@ -57,7 +66,7 @@ export async function postJson<T>(path: string, body: unknown, options?: { authR
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await doFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body ?? {}),
@@ -67,7 +76,7 @@ export async function postJson<T>(path: string, body: unknown, options?: { authR
     const newToken = await tryRefresh()
     if (newToken) {
       headers.Authorization = `Bearer ${newToken}`
-      const retryRes = await fetch(`${API_BASE}${path}`, {
+      const retryRes = await doFetch(`${API_BASE}${path}`, {
         method: 'POST', headers, body: JSON.stringify(body ?? {}),
       })
       return handleResponse<T>(retryRes, path)
@@ -88,7 +97,7 @@ export async function postForm<T>(path: string, body: FormData, options?: { auth
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await doFetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers,
     body,
@@ -98,7 +107,7 @@ export async function postForm<T>(path: string, body: FormData, options?: { auth
     const newToken = await tryRefresh()
     if (newToken) {
       headers.Authorization = `Bearer ${newToken}`
-      const retryRes = await fetch(`${API_BASE}${path}`, {
+      const retryRes = await doFetch(`${API_BASE}${path}`, {
         method: 'POST', headers, body,
       })
       return handleResponse<T>(retryRes, path)
@@ -120,7 +129,9 @@ async function handleResponse<T>(res: Response, path: string): Promise<T> {
     if (res.status === 401) auth.clearTokens()
     const msg = data && typeof data === 'object' && (data as ApiErrorBody).error
       ? String((data as ApiErrorBody).error)
-      : `请求失败 (${res.status})`
+      : res.status >= 500
+        ? '服务暂时不可用，请稍后重试'
+        : `请求失败 (${res.status})`
     const apiErr = new ApiError(msg, res.status, data)
     reportError(apiErr, { path, status: res.status })
     throw apiErr

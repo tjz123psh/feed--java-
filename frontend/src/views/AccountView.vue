@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
+import Icon from '../components/Icon.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import { ApiError } from '../api/client'
 import * as accountApi from '../api/account'
@@ -215,122 +216,168 @@ watch(
 
 <template>
   <AppShell>
-    <div v-if="!auth.isLoggedIn" class="login-wrap">
-      <div class="card login-card">
-        <p class="title">登录</p>
-        <div class="grid" style="margin-top: 10px">
-          <div>
-            <label>username</label>
-            <input v-model.trim="loginForm.username" autocomplete="username" />
+    <div v-if="!auth.isLoggedIn" class="page">
+      <div class="page-inner" style="--page-max: 440px">
+        <header class="auth-head">
+          <span class="brand-dot"><Icon name="play" :size="16" filled /></span>
+          <h1 class="page-title">登录</h1>
+          <p class="page-sub">登录后可以点赞、评论、关注和上传作品</p>
+        </header>
+
+        <div class="form">
+          <div class="field">
+            <label for="login-username">用户名</label>
+            <input id="login-username" v-model.trim="loginForm.username" autocomplete="username" />
           </div>
-          <div>
-            <label>password</label>
-            <input v-model.trim="loginForm.password" type="password" autocomplete="current-password" @keydown.enter="onLogin" />
+          <div class="field">
+            <label for="login-password">密码</label>
+            <input
+              id="login-password"
+              v-model.trim="loginForm.password"
+              type="password"
+              autocomplete="current-password"
+              @keydown.enter="onLogin"
+            />
           </div>
-          <button class="primary" type="button" :disabled="busy" @click="onLogin">登录</button>
+          <button class="btn btn--primary btn--lg btn--block" type="button" :disabled="busy" @click="onLogin">
+            登录
+          </button>
         </div>
 
-        <div class="row" style="justify-content: space-between; margin-top: 14px">
-          <button class="ghost" type="button" :disabled="busy" @click="goRegister">注册账号</button>
-          <button class="ghost" type="button" :disabled="busy" @click="goChangePassword">修改密码</button>
+        <div class="auth-alt">
+          <button class="btn btn--ghost" type="button" :disabled="busy" @click="goRegister">注册账号</button>
+          <button class="btn btn--ghost" type="button" :disabled="busy" @click="goChangePassword">修改密码</button>
         </div>
       </div>
     </div>
 
-    <template v-else>
-      <div class="card">
-        <div class="row" style="justify-content: space-between; align-items: flex-start">
-          <div class="row" style="gap: 12px; align-items: center">
-            <UserAvatar :username="me.username" :id="me.id" :size="64" />
-            <div>
-              <div class="title" style="margin: 0">@{{ me.username }}</div>
-              <div class="subtle mono">#{{ me.id }}</div>
+    <div v-else class="page">
+      <div class="page-inner">
+        <header class="profile">
+          <UserAvatar :username="me.username" :id="me.id" :size="64" />
+          <h1 class="page-title profile-name">@{{ me.username }}</h1>
+          <button class="btn profile-settings" type="button" aria-label="账号设置" @click="goSettings">
+            <Icon name="sliders" :size="16" />
+            <span>设置</span>
+          </button>
+        </header>
+
+        <div class="stats" role="group" aria-label="账号数据">
+          <button class="stat" type="button" :disabled="social.followersLoading" @click="openFollowers">
+            <span class="stat-num">{{ social.followersLoading ? '…' : social.followerCount }}</span>
+            <span class="stat-label">粉丝</span>
+          </button>
+          <button class="stat" type="button" :disabled="social.vloggersLoading" @click="openFollowing">
+            <span class="stat-num">{{ social.vloggersLoading ? '…' : social.followingCount }}</span>
+            <span class="stat-label">关注</span>
+          </button>
+          <button class="stat" type="button" :class="{ on: videoTab === 'works' }" @click="openWorksVideos">
+            <span class="stat-num">{{ myVideos.loading ? '…' : myVideos.items.length }}</span>
+            <span class="stat-label">作品</span>
+          </button>
+          <button class="stat" type="button" :class="{ on: videoTab === 'likes' }" @click="openLikedVideos">
+            <span class="stat-num">{{ likedVideos.loading ? '…' : likedVideos.loaded ? likedVideos.items.length : '—' }}</span>
+            <span class="stat-label">点赞</span>
+          </button>
+        </div>
+
+        <p v-if="socialErrorHint" class="error-line">
+          <Icon name="alert" :size="14" />
+          <span>社交信息加载失败：{{ socialErrorHint }}</span>
+        </p>
+
+        <section class="works" aria-labelledby="works-title">
+          <header class="works-head">
+            <h2 id="works-title" class="section-title">{{ videoTab === 'works' ? '作品' : '点赞视频' }}</h2>
+          </header>
+
+          <template v-if="videoTab === 'works'">
+            <p v-if="myVideos.loading" class="hint">加载中…</p>
+            <p v-else-if="myVideos.error" class="hint bad">
+              <Icon name="alert" :size="14" />
+              <span>{{ myVideos.error }}</span>
+            </p>
+            <div v-else-if="myVideos.items.length === 0" class="empty">
+              <Icon name="film" :size="24" />
+              <p>暂无作品</p>
+              <RouterLink class="btn" to="/video">去发布第一支视频</RouterLink>
             </div>
-          </div>
+            <ul v-else class="works-grid">
+              <li v-for="v in myVideos.items" :key="v.id">
+                <button class="work" type="button" @click="goVideo(v.id)">
+                  <img class="work-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
+                  <span class="work-title">{{ v.title }}</span>
+                  <span class="work-meta">
+                    <Icon name="heart" :size="13" filled />
+                    <span>{{ v.likes_count }}</span>
+                    <span class="work-sep">·</span>
+                    <span>{{ new Date(v.create_time).toLocaleDateString() }}</span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </template>
 
-          <div class="row">
-            <button class="ghost" type="button" @click="goSettings">设置</button>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top: 14px">
-          <button class="metric" type="button" :disabled="social.followersLoading" @click="openFollowers">
-            <div class="metric-num">{{ social.followersLoading ? '…' : social.followerCount }}</div>
-            <div class="metric-label">粉丝</div>
-          </button>
-          <button class="metric" type="button" :disabled="social.vloggersLoading" @click="openFollowing">
-            <div class="metric-num">{{ social.vloggersLoading ? '…' : social.followingCount }}</div>
-            <div class="metric-label">关注</div>
-          </button>
-          <button class="metric" type="button" :class="{ active: videoTab === 'works' }" @click="openWorksVideos">
-            <div class="metric-num">{{ myVideos.loading ? '…' : myVideos.items.length }}</div>
-            <div class="metric-label">作品</div>
-          </button>
-          <button class="metric" type="button" :class="{ active: videoTab === 'likes' }" @click="openLikedVideos">
-            <div class="metric-num">{{ likedVideos.loading ? '…' : likedVideos.loaded ? likedVideos.items.length : '—' }}</div>
-            <div class="metric-label">点赞</div>
-          </button>
-          <div v-if="socialErrorHint" class="subtle" style="margin-left: 8px">社交信息加载失败：{{ socialErrorHint }}</div>
-        </div>
+          <template v-else>
+            <p v-if="likedVideos.loading" class="hint">加载中…</p>
+            <p v-else-if="likedVideos.error" class="hint bad">
+              <Icon name="alert" :size="14" />
+              <span>{{ likedVideos.error }}</span>
+            </p>
+            <div v-else-if="likedVideos.items.length === 0" class="empty">
+              <Icon name="film" :size="24" />
+              <p>暂无点赞视频</p>
+              <RouterLink class="btn" to="/">去看看推荐流</RouterLink>
+            </div>
+            <ul v-else class="works-grid">
+              <li v-for="v in likedVideos.items" :key="v.id">
+                <button class="work" type="button" @click="goVideo(v.id)">
+                  <img class="work-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
+                  <span class="work-title">{{ v.title }}</span>
+                  <span class="work-meta">
+                    <Icon name="heart" :size="13" filled />
+                    <span>{{ v.likes_count }}</span>
+                    <span class="work-sep">·</span>
+                    <span>{{ new Date(v.create_time).toLocaleDateString() }}</span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </template>
+        </section>
       </div>
+    </div>
 
-      <div class="card" style="margin-top: 14px">
-        <div class="row" style="justify-content: space-between">
-          <p class="title" style="margin: 0">{{ videoTab === 'works' ? '作品' : '点赞视频' }}</p>
-          <div class="subtle">点击封面进入播放页</div>
-        </div>
-
-        <template v-if="videoTab === 'works'">
-          <div v-if="myVideos.loading" class="hint" style="margin-top: 12px">加载中…</div>
-          <div v-else-if="myVideos.error" class="hint bad" style="margin-top: 12px">{{ myVideos.error }}</div>
-          <div v-else-if="myVideos.items.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
-
-          <div v-else class="video-grid" style="margin-top: 12px">
-            <button v-for="v in myVideos.items" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
-              <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
-              <div class="video-meta">
-                <div class="video-title">{{ v.title }}</div>
-                <div class="video-sub subtle">❤️ {{ v.likes_count }} · {{ new Date(v.create_time).toLocaleDateString() }}</div>
-              </div>
-            </button>
-          </div>
-        </template>
-        <template v-else>
-          <div v-if="likedVideos.loading" class="hint" style="margin-top: 12px">加载中…</div>
-          <div v-else-if="likedVideos.error" class="hint bad" style="margin-top: 12px">{{ likedVideos.error }}</div>
-          <div v-else-if="likedVideos.items.length === 0" class="hint" style="margin-top: 12px">暂无点赞视频</div>
-
-          <div v-else class="video-grid" style="margin-top: 12px">
-            <button v-for="v in likedVideos.items" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
-              <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
-              <div class="video-meta">
-                <div class="video-title">{{ v.title }}</div>
-                <div class="video-sub subtle">❤️ {{ v.likes_count }} · {{ new Date(v.create_time).toLocaleDateString() }}</div>
-              </div>
-            </button>
-          </div>
-        </template>
-      </div>
-    </template>
-
-    <div v-if="drawer.open" class="drawer-backdrop" @click.self="closeDrawer">
+    <div
+      v-if="drawer.open"
+      class="drawer-backdrop"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="listTitle"
+      @click.self="closeDrawer"
+    >
       <div class="drawer">
-        <div class="drawer-head">
-          <div class="drawer-title">{{ listTitle }}</div>
-          <button class="drawer-x" type="button" @click="closeDrawer">×</button>
-        </div>
-        <div class="drawer-body">
-          <div v-if="drawerLoading" class="drawer-hint">加载中…</div>
-          <div v-else-if="drawerError" class="drawer-hint bad">{{ drawerError }}</div>
-          <div v-else-if="listItems.length === 0" class="drawer-hint">暂无</div>
-
-          <button v-for="u in listItems" v-if="!drawerLoading && !drawerError" :key="u.id" class="user-row" type="button" @click="goUser(u.id)">
-            <UserAvatar :username="u.username" :id="u.id" :size="40" />
-            <div class="user-meta">
-              <div class="user-name">@{{ u.username }}</div>
-              <div class="user-id mono">#{{ u.id }}</div>
-            </div>
+        <header class="drawer-head">
+          <h2 class="drawer-title">{{ listTitle }}</h2>
+          <button class="btn btn--ghost btn--icon" type="button" aria-label="关闭" @click="closeDrawer">
+            <Icon name="close" :size="16" />
           </button>
+        </header>
+        <div class="drawer-body">
+          <p v-if="drawerLoading" class="drawer-hint">加载中…</p>
+          <p v-else-if="drawerError" class="drawer-hint bad">
+            <Icon name="alert" :size="14" />
+            <span>{{ drawerError }}</span>
+          </p>
+          <p v-else-if="listItems.length === 0" class="drawer-hint">暂无{{ listTitle }}</p>
+          <ul v-else class="user-list">
+            <li v-for="u in listItems" :key="u.id">
+              <button class="user-row" type="button" @click="goUser(u.id)">
+                <UserAvatar :username="u.username" :id="u.id" :size="40" />
+                <span class="user-name">@{{ u.username }}</span>
+              </button>
+            </li>
+          </ul>
         </div>
       </div>
     </div>
@@ -338,231 +385,334 @@ watch(
 </template>
 
 <style scoped>
-.login-wrap {
+/* —— 登录表单 —— */
+.auth-head {
   display: grid;
   justify-items: center;
-  align-content: start;
-  padding: clamp(56px, 14vh, 160px) 16px 40px;
+  gap: var(--sp-3);
+  text-align: center;
+  padding-top: var(--sp-8);
 }
 
-.login-card {
-  width: min(420px, 100%);
-}
-
-.ghost {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.055);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.metric {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 12px 14px;
-  min-width: 120px;
-  cursor: pointer;
+.brand-dot {
   display: grid;
-  gap: 4px;
-  text-align: left;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: var(--text);
+  box-shadow: 0 6px 18px var(--brand-dim);
 }
 
-.metric:hover {
-  background: rgba(255, 255, 255, 0.1);
+.form {
+  display: grid;
+  gap: var(--sp-5);
+  margin-top: var(--sp-8);
 }
 
-.metric.active {
-  background: rgba(43, 161, 255, 0.14);
-  border-color: rgba(43, 161, 255, 0.55);
+.field {
+  display: grid;
+  gap: var(--sp-2);
 }
 
-.metric.static {
-  cursor: default;
+.field label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--text-2);
 }
 
-.metric:disabled {
+.auth-alt {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+}
+
+/* —— 已登录：身份与数据 —— */
+.profile {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.profile-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.profile-settings {
+  flex: none;
+}
+
+.stats {
+  display: flex;
+  gap: var(--sp-8);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.stat {
+  position: relative;
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+  padding-bottom: var(--sp-2);
+}
+
+.stat-num {
+  font-size: var(--text-title);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
+}
+
+.stat-label {
+  font-size: var(--text-caption);
+  color: var(--text-2);
+}
+
+.stat:hover .stat-num {
+  color: var(--text);
+}
+
+.stat.on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 24px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--brand);
+}
+
+.stat:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.metric-num {
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: 0.2px;
+.error-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  font-size: var(--text-meta);
+  color: var(--danger);
 }
 
-.metric-label {
-  font-size: 12px;
-  color: var(--muted);
+/* —— 作品 / 点赞列表 —— */
+.works {
+  margin-top: var(--sp-8);
+}
+
+.works-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.section-title {
+  font-size: var(--text-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.works-hint {
+  font-size: var(--text-meta);
+  color: var(--text-3);
 }
 
 .hint {
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-5);
+  font-size: var(--text-small);
+  color: var(--text-2);
 }
 
 .hint.bad {
   color: var(--danger);
 }
 
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-10) 0;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.empty p {
+  font-size: var(--text-small);
+  color: var(--text-2);
+}
+
+.works-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-5) var(--sp-4);
+  list-style: none;
+  margin: var(--sp-5) 0 0;
+  padding: 0;
+}
+
+.works-grid li {
+  min-width: 0;
+}
+
+.work {
+  display: grid;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+}
+
+.work-cover {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  transition: opacity var(--dur-quick) var(--ease-out);
+}
+
+.work:hover .work-cover {
+  opacity: 0.85;
+}
+
+.work-title {
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: var(--leading-normal);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.work-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--text-caption);
+  color: var(--text-3);
+}
+
+.work-sep {
+  padding: 0 2px;
+}
+
+/* —— 粉丝 / 关注抽屉 —— */
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
   z-index: 120;
   display: grid;
-  justify-items: center;
-  align-items: center;
-  padding: 16px;
+  place-items: center;
+  padding: var(--sp-4);
+  background: var(--scrim-2);
+  backdrop-filter: blur(8px);
 }
 
 .drawer {
-  width: min(520px, calc(100vw - 18px));
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100%);
   max-height: min(78vh, 720px);
-  background: rgba(13, 18, 29, 0.92);
-  border: 1px solid var(--border);
-  border-radius: 8px;
   overflow: hidden;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 70px var(--scrim-3);
 }
 
 .drawer-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
 }
 
 .drawer-title {
-  font-weight: 900;
-}
-
-.drawer-x {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  font-size: 20px;
-  line-height: 1;
+  font-size: var(--text-title);
+  font-weight: 700;
 }
 
 .drawer-body {
-  overflow: auto;
-  padding: 12px 14px;
-  display: grid;
-  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--sp-2);
 }
 
 .drawer-hint {
-  color: var(--muted);
-  padding: 12px 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+  font-size: var(--text-small);
+  color: var(--text-2);
 }
 
 .drawer-hint.bad {
   color: var(--danger);
 }
 
-.video-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-@media (max-width: 1100px) {
-  .video-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 800px) {
-  .video-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.video-card {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
+.user-list {
+  list-style: none;
+  margin: 0;
   padding: 0;
-  text-align: left;
-}
-
-.video-card:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.video-cover {
-  width: 100%;
-  aspect-ratio: 9/12;
-  object-fit: cover;
-  display: block;
-  background: rgba(0, 0, 0, 0.35);
-}
-
-.video-meta {
-  padding: 10px 10px;
-}
-
-.video-title {
-  font-weight: 800;
-  font-size: 13px;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.video-sub {
-  margin-top: 6px;
-  font-size: 12px;
 }
 
 .user-row {
-  text-align: left;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
+  display: flex;
   align-items: center;
-  padding: 10px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
-  cursor: pointer;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-5);
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  transition: background var(--dur-quick) var(--ease-out);
 }
 
 .user-row:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.user-meta {
-  min-width: 0;
+.user-list li:last-child .user-row {
+  border-bottom: 0;
 }
 
 .user-name {
-  font-weight: 800;
+  min-width: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.user-id {
-  font-size: 12px;
-  color: var(--muted);
-}
+/* —— 窄屏 —— */
+@media (max-width: 767px) {
+  .stats {
+    gap: var(--sp-6);
+  }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  .profile-name {
+    font-size: var(--text-heading);
+  }
+
+  .works-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
 }
 </style>
